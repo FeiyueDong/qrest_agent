@@ -46,13 +46,13 @@ Acceptance:
 
 ## Phase 2: Source Ingestion
 
-- [ ] Add PDF text ingestion.
-- [ ] Add DOCX text ingestion.
-- [ ] Add XLSX table ingestion.
-- [ ] Add CSV ingestion with channel-table recognition.
-- [ ] Keep a standard `SourceChunk` representation for page, paragraph, sheet, range, and row locations.
-- [ ] Add source search over ingested chunks.
-- [ ] Add tests using small synthetic PDF/DOCX/XLSX fixtures.
+- [x] Add PDF text ingestion.
+- [x] Add DOCX text ingestion.
+- [x] Add XLSX table ingestion.
+- [x] Add CSV ingestion with channel-table recognition.
+- [x] Keep a standard `SourceChunk` representation for page, paragraph, sheet, range, and row locations.
+- [x] Add source search over ingested chunks.
+- [x] Add tests using small synthetic PDF/DOCX/XLSX fixtures.
 
 Acceptance:
 
@@ -62,13 +62,13 @@ Acceptance:
 
 ## Phase 3: LLM Extraction Reliability
 
-- [ ] Improve extraction prompts for qREST field paths.
-- [ ] Add model capability notes for local small models.
-- [ ] Add benchmark cases for extraction accuracy, hallucination rate, and JSON validity.
-- [ ] Add provider config file for local and online APIs.
-- [ ] Add retries and structured error reporting for Ollama HTTP failures.
-- [ ] Compare `deepseek-r1:1.5b` against rule-based extraction on simple examples.
-- [ ] Test other local models after deployment.
+- [x] Improve extraction prompts for qREST field paths.
+- [x] Add model capability notes for local small models.
+- [x] Add benchmark cases for extraction accuracy, hallucination rate, and JSON validity.
+- [x] Add provider config file for local and online APIs.
+- [x] Add retries and structured error reporting for Ollama HTTP failures.
+- [x] Compare `deepseek-r1:1.5b` against rule-based extraction on simple examples.
+- [x] Test other local models after deployment.
 
 Acceptance:
 
@@ -135,8 +135,8 @@ Acceptance:
 
 ## Immediate Next Tasks
 
-1. Formalize the metadata schema and extension-field policy.
-2. Add audit-trail export beside final metadata export.
-3. Add preflight checks around qREST data tool calls.
-4. Add PDF/DOCX/XLSX ingestion dependencies and fixtures when we are ready to install packages.
-5. Improve local-model extraction prompts and benchmark `deepseek-r1:1.5b`.
+1. Add session state storage for multi-turn interaction.
+2. Add commands to inspect current metadata state.
+3. Generate human-readable questions for missing fields and conflicts.
+4. Support user confirmation and correction of candidate values.
+5. Add preflight checks around qREST data tool calls.

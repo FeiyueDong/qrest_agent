@@ -1,0 +1,29 @@
+{
+  "default_provider": "ollama-cli",
+  "providers": {
+    "rule": {
+      "type": "rule",
+      "description": "Deterministic local rule extractor baseline."
+    },
+    "ollama-cli": {
+      "type": "ollama-cli",
+      "description": "Local Ollama CLI provider. Useful when HTTP API is unavailable in sandboxed contexts.",
+      "models": [
+        "deepseek-r1:1.5b",
+        "qwen3.5:2b",
+        "qwen3:4b-instruct"
+      ]
+    },
+    "ollama": {
+      "type": "ollama-http",
+      "base_url": "http://localhost:11434",
+      "description": "Local Ollama HTTP API provider."
+    },
+    "openai-compatible": {
+      "type": "openai-compatible",
+      "base_url_env": "QREST_AGENT_BASE_URL",
+      "api_key_env": "QREST_AGENT_API_KEY",
+      "model_env": "QREST_AGENT_MODEL"
+    }
+  }
+}

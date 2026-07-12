@@ -9,8 +9,17 @@ from typing import Any
 
 from qrest_agent.agent.metadata_agent import MetadataAgent
 from qrest_agent.core.validator import validate_metadata
+from qrest_agent.ingestion.sources import SourceManager
+from qrest_agent.llm.benchmark import run_llm_benchmark, run_rule_benchmark
 from qrest_agent.llm.clients import OllamaCliClient, OllamaClient, OpenAICompatibleClient
-from qrest_agent.resources import list_qrest_examples, qrest_docs_root, qrest_schema_path, qrest_tool_path
+from qrest_agent.resources import (
+    list_qrest_examples,
+    llm_benchmark_cases_path,
+    llm_provider_config_path,
+    qrest_docs_root,
+    qrest_schema_path,
+    qrest_tool_path,
+)
 from qrest_agent.tools.qrest_data_tools import QrestDataTools
 
 
@@ -28,8 +37,18 @@ def main(argv: list[str] | None = None) -> int:
     extract_parser.add_argument("--base-url", default=os.environ.get("QREST_AGENT_BASE_URL", "http://localhost:11434"))
     extract_parser.add_argument("--api-key", default=os.environ.get("QREST_AGENT_API_KEY", ""))
 
+    benchmark_parser = subparsers.add_parser("benchmark-extraction", help="run extraction benchmark cases")
+    benchmark_parser.add_argument("--provider", choices=["rule", "ollama", "ollama-cli", "openai-compatible"], default="rule")
+    benchmark_parser.add_argument("--model", default=os.environ.get("QREST_AGENT_MODEL", "qwen3.5:4b"))
+    benchmark_parser.add_argument("--base-url", default=os.environ.get("QREST_AGENT_BASE_URL", "http://localhost:11434"))
+    benchmark_parser.add_argument("--api-key", default=os.environ.get("QREST_AGENT_API_KEY", ""))
+    benchmark_parser.add_argument("--output", help="optional path to write benchmark JSON")
+
     extract_file_parser = subparsers.add_parser("extract-file", help="extract candidates from a supported text file")
     extract_file_parser.add_argument("path")
+
+    ingest_file_parser = subparsers.add_parser("ingest-file", help="show source chunks extracted from a supported file")
+    ingest_file_parser.add_argument("path")
 
     export_file_parser = subparsers.add_parser(
         "export-from-file",
@@ -57,8 +76,12 @@ def main(argv: list[str] | None = None) -> int:
         return _validate(args.metadata_json)
     if args.command == "extract-text":
         return _extract_text(args)
+    if args.command == "benchmark-extraction":
+        return _benchmark_extraction(args)
     if args.command == "extract-file":
         return _extract_file(args.path)
+    if args.command == "ingest-file":
+        return _ingest_file(args.path)
     if args.command == "export-from-file":
         return _export_from_file(args.path, args.metadata_output, args.audit_output)
     if args.command == "resources":
@@ -91,6 +114,18 @@ def _extract_file(path: str) -> int:
     return 0
 
 
+def _ingest_file(path: str) -> int:
+    manager = SourceManager()
+    chunks = manager.add_file(path)
+    payload = {
+        "path": path,
+        "chunk_count": len(chunks),
+        "chunks": [chunk.to_dict() for chunk in chunks],
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _export_from_file(path: str, metadata_output: str, audit_output: str) -> int:
     agent = MetadataAgent()
     result = agent.run_turn(files=[path])
@@ -110,6 +145,10 @@ def _resources(as_json: bool) -> int:
         "examples": [str(path) for path in list_qrest_examples()],
         "docs": str(qrest_docs_root()),
         "schema": str(qrest_schema_path()),
+        "llm": {
+            "provider_config": str(llm_provider_config_path()),
+            "benchmark_cases": str(llm_benchmark_cases_path()),
+        },
         "tools": {
             "data_generator": str(qrest_tool_path("data_generator")),
             "data_loader": str(qrest_tool_path("data_loader")),
@@ -121,6 +160,8 @@ def _resources(as_json: bool) -> int:
         print("Bundled qREST resources")
         print(f"Docs: {payload['docs']}")
         print(f"Schema: {payload['schema']}")
+        print(f"LLM provider config: {payload['llm']['provider_config']}")
+        print(f"LLM benchmark cases: {payload['llm']['benchmark_cases']}")
         print("Examples:")
         for path in payload["examples"]:
             print(f"  - {path}")
@@ -140,6 +181,20 @@ def _load_qrest(input_qrest: str, output_metadata_json: str, output_data_txt: st
     result = QrestDataTools().load_qrest(input_qrest, output_metadata_json, output_data_txt)
     print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     return 0 if result.ok else 1
+
+
+def _benchmark_extraction(args: argparse.Namespace) -> int:
+    if args.provider == "rule":
+        result = run_rule_benchmark()
+    else:
+        client = _make_client(args)
+        result = run_llm_benchmark(args.model, client)
+
+    if args.output:
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
 
 
 def _make_client(args: argparse.Namespace) -> Any:

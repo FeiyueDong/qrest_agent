@@ -1,0 +1,203 @@
+{
+    "Header": "qREST_DATA",
+    "Version": [ 1, 0, 0 ],
+    "Units": [ "m", "s" ],
+    "BuildingInfo": {
+        "ProjectName": "Kunming_SSJY",
+        "GeoLocation": {
+            "Longitude": 21.85,
+            "Latitude": 95.95,
+            "NorthAngle": 0.0
+        },
+        "StructuralType": "SteelFrame",
+        "StructuralFootprint": {
+            "Shape": "Rectangular",
+            "Parameters": { "Length": 42, "Width": 25.2 },
+            "BoundingBox": {
+                "MaxX": 21.0,
+                "MinX": -21.0,
+                "MaxY": 12.6,
+                "MinY": -12.6
+            }
+        },
+        "ElevationNum": 16,
+        "Elevation": [
+            -2.7, 0.0, 4.5, 7.8, 11.1, 14.4, 17.7, 21.0, 24.3, 27.6, 30.9, 34.2, 37.5, 40.8, 44.1, 47.4
+        ]
+    },
+    "InstrumentInfo": {
+        "Provider": "SSJY",
+        "ChannelNum": 18,
+        "Channels": [
+            {
+                "ChannelNo": 1,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [ -20.6, -4.2, -2.7 ]
+            },
+            {
+                "ChannelNo": 2,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [ 20.6, -4.2, -2.7 ]
+            },
+            {
+                "ChannelNo": 3,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [ 0.0, -4.2, -2.7 ]
+            },
+            {
+                "ChannelNo": 4,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [ -20.6, -4.2, 0.0 ]
+            },
+            {
+                "ChannelNo": 5,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [ 20.6, -4.2, 0.0 ]
+            },
+            {
+                "ChannelNo": 6,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [ 0.0, -4.2, 0.0 ]
+            },
+            {
+                "ChannelNo": 7,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [ -20.6, -4.2, 11.0 ]
+            },
+            {
+                "ChannelNo": 8,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [ 20.6, -4.2, 11.0 ]
+            },
+            {
+                "ChannelNo": 9,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [ 0.0, -4.2, 11.0 ]
+            },
+            {
+                "ChannelNo": 10,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [ -20.6, -4.2, 21.0 ]
+            },
+            {
+                "ChannelNo": 11,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [ 20.6, -4.2, 21.0 ]
+            },
+            {
+                "ChannelNo": 12,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [ 0.0, -4.2, 21.0 ]
+            },
+            {
+                "ChannelNo": 13,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [ -20.6, -4.2, 30.9 ]
+            },
+            {
+                "ChannelNo": 14,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [ 20.6, -4.2, 30.9 ]
+            },
+            {
+                "ChannelNo": 15,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [ 0.0, -4.2, 30.9 ]
+            },
+            {
+                "ChannelNo": 16,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [ -20.6, -4.2, 44.1 ]
+            },
+            {
+                "ChannelNo": 17,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [ 20.6, -4.2, 44.1 ]
+            },
+            {
+                "ChannelNo": 18,
+                "ChannelID": "UNKNOWN",
+                "DeviceType": "S05",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [ 0.0, -4.2, 44.1 ]
+            }
+        ]
+    },
+    "DataInfo": {
+        "EventName": "2025_MYANMAR_7.9",
+        "StartTime": "2025-03-28T14:20:00.000+08:00",
+        "NPTS": 30000,
+        "DT": 0.02,
+        "Corrected": "NULL"
+    }
+}

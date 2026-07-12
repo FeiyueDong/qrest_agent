@@ -29,8 +29,30 @@ Important files include:
 - `test_outputs/tools/loaded_data_head.txt`
 - `test_outputs/tools/generate_qrest_result.json`
 - `test_outputs/tools/generated.qrest`
+- `test_outputs/ingestion/docx_chunks.json`
+- `test_outputs/ingestion/pdf_chunks.json`
+- `test_outputs/ingestion/docx_text.txt`
+- `test_outputs/ingestion/pdf_text.txt`
+- `test_outputs/ingestion/document_agent_extraction_results.json`
+- `test_outputs/llm/benchmark_case_summary.json`
+- `test_outputs/llm/rule_benchmark.json`
+- `test_outputs/llm/deepseek-r1_1.5b_benchmark.json`
+- `test_outputs/llm/qwen3.5_2b_benchmark.json`
+- `test_outputs/llm/qwen3_4b-instruct_benchmark.json`
+
+PDF ingestion currently depends on the system `pdftotext` command. The tests use `resources/input_doc/Kunming_building_metadata_test_case.pdf` and `resources/input_doc/Kunming_building_metadata_test_case.docx`.
 
 These files are not fixtures. They are generated artifacts that show what the current system produced during the latest test run.
+
+## LLM Benchmark Outputs
+
+The local-model benchmark stores one JSON report per model. Each report contains aggregate metrics and per-case candidate details:
+
+- `accuracy`: expected fields that were extracted with the expected value;
+- `hallucination_rate`: forbidden fields that were extracted despite missing evidence;
+- `json_valid_rate`: benchmark cases where the model output could be parsed as a JSON object.
+
+The benchmark intentionally does not merge candidates into project state. It only checks whether an extractor can produce safe candidate records.
 
 ## Test Style
 

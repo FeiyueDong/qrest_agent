@@ -55,3 +55,14 @@ Provider-specific SDKs can be added behind the same `complete_json()` boundary.
 - `load_qrest(input_qrest, output_metadata_json, output_data_txt)`.
 
 These tools are intentionally kept separate from LLM extraction. The model may request a conversion, but the conversion itself is performed by the bundled command-line tools and returns a structured `ToolResult`.
+
+## Source Ingestion
+
+`SourceManager` converts uploaded materials into `SourceChunk` records with stable source IDs and locations:
+
+- PDF: uses the local `pdftotext` command and records page/chunk locations.
+- DOCX: reads `word/document.xml` directly and records paragraph locations.
+- CSV: records row-oriented text chunks.
+- XLSX: reads worksheet XML and shared strings directly and records sheet/chunk locations.
+
+The ingestion layer extracts text only. Candidate generation remains a separate extractor step so that deterministic validation and evidence tracking stay independent from file parsing.

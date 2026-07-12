@@ -29,6 +29,23 @@ env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli extract-text "项目名�
 
 Tests write human-readable artifacts to `test_outputs/` for manual review. See [docs/testing.md](docs/testing.md).
 
+## LLM Extraction Benchmark
+
+The extraction benchmark compares deterministic extraction with local or online model providers:
+
+```bash
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli benchmark-extraction \
+  --provider rule \
+  --output test_outputs/llm/rule_benchmark.json
+
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli benchmark-extraction \
+  --provider ollama-cli \
+  --model qwen3:4b-instruct \
+  --output test_outputs/llm/qwen3_4b-instruct_benchmark.json
+```
+
+Current local-model notes are tracked in [docs/llm_models.md](docs/llm_models.md).
+
 ## Bundled qREST Resources
 
 The project carries a local qREST reference bundle under `resources/qrest_data/`:
@@ -38,6 +55,8 @@ The project carries a local qREST reference bundle under `resources/qrest_data/`
 - `tools/linux/bin/`: bundled `data_generator` and `data_loader` binaries copied from qREST_Data.
 
 This keeps tests and agent workflows independent from `/home/yue/CodeFiles/qrest_data`.
+
+Input documents for ingestion tests live under `resources/input_doc/`. PDF parsing currently uses the system `pdftotext` command; DOCX/XLSX/CSV parsing uses the Python standard library.
 
 ## qREST Data Tools
 

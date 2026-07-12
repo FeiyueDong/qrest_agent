@@ -32,6 +32,18 @@ def qrest_schema_path() -> Path:
     return qrest_data_root() / "schema" / "metadata_schema.json"
 
 
+def llm_resource_root() -> Path:
+    return resource_root() / "llm"
+
+
+def llm_benchmark_cases_path() -> Path:
+    return llm_resource_root() / "benchmark_cases.json"
+
+
+def llm_provider_config_path() -> Path:
+    return llm_resource_root() / "provider_config.json"
+
+
 def qrest_tool_path(tool_name: str) -> Path:
     system = platform.system().lower()
     if system != "linux":
