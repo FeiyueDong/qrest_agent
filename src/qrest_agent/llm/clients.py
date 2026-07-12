@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -38,6 +40,24 @@ class OllamaClient:
         return _parse_json_object(content)
 
 
+class OllamaCliClient:
+    def __init__(self, model: str) -> None:
+        self.model = model
+
+    def complete_json(self, messages: list[dict[str, str]], schema_hint: dict[str, Any] | None = None) -> dict[str, Any]:
+        prompt = "\n\n".join(f"{message['role'].upper()}:\n{message['content']}" for message in messages)
+        completed = subprocess.run(
+            ["ollama", "run", self.model, prompt],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(f"ollama run failed: {completed.stderr}")
+        return _parse_json_object(_strip_ansi(completed.stdout))
+
+
 class OpenAICompatibleClient:
     def __init__(self, model: str, api_key: str, base_url: str) -> None:
         self.model = model
@@ -70,16 +90,61 @@ def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str] | None
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
             return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"LLM request failed: HTTP {exc.code} {exc.reason}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"LLM request failed: {exc}") from exc
 
 
 def _parse_json_object(content: str) -> dict[str, Any]:
+    content = _strip_ansi(content).strip()
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"model did not return valid JSON: {content}") from exc
+        extracted = _extract_json_object(content)
+        if extracted is None:
+            raise ValueError(f"model did not return valid JSON: {content}") from exc
+        try:
+            parsed = json.loads(extracted)
+        except json.JSONDecodeError as nested_exc:
+            raise ValueError(f"model did not return valid JSON: {content}") from nested_exc
     if not isinstance(parsed, dict):
         raise ValueError("model JSON response must be an object")
     return parsed
 
+
+def _extract_json_object(content: str) -> str | None:
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, flags=re.DOTALL)
+    if fence_match:
+        return fence_match.group(1)
+
+    start = content.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for index in range(start, len(content)):
+        char = content[index]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return content[start : index + 1]
+    return None
+
+
+def _strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)

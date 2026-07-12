@@ -41,3 +41,17 @@ The current client layer supports:
 
 Provider-specific SDKs can be added behind the same `complete_json()` boundary.
 
+## Bundled qREST Tool Skills
+
+`resources/qrest_data/` contains the local qREST reference bundle used by this project:
+
+- protocol docs copied from qREST_Data;
+- complete sample datasets;
+- Linux `data_generator` and `data_loader` binaries.
+
+`qrest_agent.tools.QrestDataTools` exposes these as deterministic agent skills:
+
+- `generate_qrest(metadata_json, data_txt, output_qrest)`;
+- `load_qrest(input_qrest, output_metadata_json, output_data_txt)`.
+
+These tools are intentionally kept separate from LLM extraction. The model may request a conversion, but the conversion itself is performed by the bundled command-line tools and returns a structured `ToolResult`.

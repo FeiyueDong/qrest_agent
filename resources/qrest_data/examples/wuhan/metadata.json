@@ -1,0 +1,476 @@
+{
+    "Header": "qREST_DATA",
+    "Version": [
+        1,
+        0,
+        0
+    ],
+    "Units": [
+        "m",
+        "s"
+    ],
+    "BuildingInfo": {
+        "ProjectName": "Wuhan_XYDS",
+        "GeoLocation": {
+            "Longitude": 0.0,
+            "Latitude": 0.0,
+            "NorthAngle": 0.0
+        },
+        "StructuralType": "UNKNOWN",
+        "StructuralFootprint": {
+            "Shape": "Polygon",
+            "Parameters": {
+                "Corners": [
+                    [
+                        0.0,
+                        23.0940107676
+                    ],
+                    [
+                        -20.0,
+                        -11.5470053838
+                    ],
+                    [
+                        20.0,
+                        -11.5470053838
+                    ]
+                ]
+            },
+            "BoundingBox": {
+                "MaxX": 20.0,
+                "MinX": -20.0,
+                "MaxY": 23.0940107676,
+                "MinY": -11.5470053838
+            }
+        },
+        "ElevationNum": 63,
+        "Elevation": [
+            -19.2,
+            -15.6,
+            -10.6,
+            -5.3,
+            0.0,
+            6.0,
+            11.4,
+            16.8,
+            21.9,
+            26.7,
+            30.9,
+            35.1,
+            39.3,
+            44.0,
+            47.7,
+            51.9,
+            56.1,
+            60.3,
+            64.5,
+            68.7,
+            72.9,
+            77.1,
+            81.3,
+            85.5,
+            89.7,
+            93.9,
+            98.1,
+            102.3,
+            106.5,
+            110.7,
+            114.9,
+            120.3,
+            124.5,
+            128.7,
+            132.9,
+            137.1,
+            141.3,
+            145.5,
+            149.7,
+            153.9,
+            158.1,
+            162.3,
+            167.7,
+            171.6,
+            175.5,
+            179.4,
+            183.3,
+            187.2,
+            191.1,
+            195.0,
+            198.9,
+            202.8,
+            206.7,
+            210.6,
+            214.5,
+            218.4,
+            222.4,
+            227.8,
+            232.1,
+            236.4,
+            240.7,
+            245.0,
+            249.3
+        ]
+    },
+    "InstrumentInfo": {
+        "Provider": "UNKNOWN",
+        "ChannelNum": 27,
+        "Channels": [
+            {
+                "ChannelNo": 1,
+                "ChannelID": "X1",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    -19.2
+                ]
+            },
+            {
+                "ChannelNo": 2,
+                "ChannelID": "X2",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    0.0
+                ]
+            },
+            {
+                "ChannelNo": 3,
+                "ChannelID": "X3",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    21.9
+                ]
+            },
+            {
+                "ChannelNo": 4,
+                "ChannelID": "X4",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    44.0
+                ]
+            },
+            {
+                "ChannelNo": 5,
+                "ChannelID": "X5",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    89.7
+                ]
+            },
+            {
+                "ChannelNo": 6,
+                "ChannelID": "X6",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    132.9
+                ]
+            },
+            {
+                "ChannelNo": 7,
+                "ChannelID": "X7",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    171.6
+                ]
+            },
+            {
+                "ChannelNo": 8,
+                "ChannelID": "X8",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    232.1
+                ]
+            },
+            {
+                "ChannelNo": 9,
+                "ChannelID": "X9",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 90.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    249.3
+                ]
+            },
+            {
+                "ChannelNo": 10,
+                "ChannelID": "Y1",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    -19.2
+                ]
+            },
+            {
+                "ChannelNo": 11,
+                "ChannelID": "Y2",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    0.0
+                ]
+            },
+            {
+                "ChannelNo": 12,
+                "ChannelID": "Y3",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    21.9
+                ]
+            },
+            {
+                "ChannelNo": 13,
+                "ChannelID": "Y4",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    44.0
+                ]
+            },
+            {
+                "ChannelNo": 14,
+                "ChannelID": "Y5",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    89.7
+                ]
+            },
+            {
+                "ChannelNo": 15,
+                "ChannelID": "Y6",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    132.9
+                ]
+            },
+            {
+                "ChannelNo": 16,
+                "ChannelID": "Y7",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    171.6
+                ]
+            },
+            {
+                "ChannelNo": 17,
+                "ChannelID": "Y8",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    232.1
+                ]
+            },
+            {
+                "ChannelNo": 18,
+                "ChannelID": "Y9",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": 0.0,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    249.3
+                ]
+            },
+            {
+                "ChannelNo": 19,
+                "ChannelID": "Z1",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": -1,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    -19.2
+                ]
+            },
+            {
+                "ChannelNo": 20,
+                "ChannelID": "Z2",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": -1,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    0.0
+                ]
+            },
+            {
+                "ChannelNo": 21,
+                "ChannelID": "Z3",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": -1,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    21.9
+                ]
+            },
+            {
+                "ChannelNo": 22,
+                "ChannelID": "Z4",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": -1,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    44.0
+                ]
+            },
+            {
+                "ChannelNo": 23,
+                "ChannelID": "Z5",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": -1,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    89.7
+                ]
+            },
+            {
+                "ChannelNo": 24,
+                "ChannelID": "Z6",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": -1,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    132.9
+                ]
+            },
+            {
+                "ChannelNo": 25,
+                "ChannelID": "Z7",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": -1,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    171.6
+                ]
+            },
+            {
+                "ChannelNo": 26,
+                "ChannelID": "Z8",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": -1,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    232.1
+                ]
+            },
+            {
+                "ChannelNo": 27,
+                "ChannelID": "Z9",
+                "DeviceType": "VOLCAS",
+                "Measurand": "Acceleration",
+                "Scale": 1,
+                "Azimuth": -1,
+                "LocationXYZ": [
+                    0.0,
+                    0.0,
+                    249.3
+                ]
+            }
+        ]
+    },
+    "DataInfo": {
+        "EventName": "2024_HUALIAN",
+        "StartTime": "2024-04-03T14:20:00.000+08:00",
+        "NPTS": 30000,
+        "DT": 0.02,
+        "Corrected": "UNCORRECTED"
+    }
+}

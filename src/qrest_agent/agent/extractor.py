@@ -6,6 +6,7 @@ from typing import Any
 
 from qrest_agent.agent.prompts import EXTRACTION_SYSTEM_PROMPT, build_extraction_user_prompt
 from qrest_agent.core.models import Candidate, Evidence
+from qrest_agent.core.schema import QREST_REQUIRED_PATHS
 from qrest_agent.ingestion.sources import SourceChunk
 from qrest_agent.llm.clients import BaseLLMClient
 
@@ -23,9 +24,9 @@ class LLMExtractor:
             ]
             result = self.client.complete_json(messages)
             for item in result.get("candidates", []):
-                data = dict(item)
-                data.setdefault("evidence", [{"source_id": chunk.source_id, "location": chunk.location, "text": chunk.text[:300]}])
-                candidates.append(Candidate.from_dict(data))
+                candidate = _candidate_from_model_item(item, chunk)
+                if candidate is not None:
+                    candidates.append(candidate)
         return candidates
 
 
@@ -164,6 +165,29 @@ def _candidate(
     )
 
 
+def _candidate_from_model_item(item: Any, chunk: SourceChunk) -> Candidate | None:
+    if not isinstance(item, dict):
+        return None
+    field_path = item.get("field_path")
+    if field_path not in QREST_REQUIRED_PATHS:
+        return None
+
+    evidence_items: list[dict[str, Any]] = []
+    raw_evidence = item.get("evidence")
+    if isinstance(raw_evidence, list):
+        for evidence in raw_evidence:
+            if isinstance(evidence, dict):
+                evidence_items.append(evidence)
+            elif isinstance(evidence, str):
+                evidence_items.append({"source_id": chunk.source_id, "location": chunk.location, "text": evidence})
+    if not evidence_items and item.get("value") is not None:
+        evidence_items.append({"source_id": chunk.source_id, "location": chunk.location, "text": chunk.text[:300]})
+
+    data = dict(item)
+    data["evidence"] = evidence_items
+    return Candidate.from_dict(data)
+
+
 def _get(data: dict[str, Any], path: str) -> Any:
     current: Any = data
     for part in path.split("."):
@@ -171,4 +195,3 @@ def _get(data: dict[str, Any], path: str) -> Any:
             return None
         current = current.get(part)
     return current
-

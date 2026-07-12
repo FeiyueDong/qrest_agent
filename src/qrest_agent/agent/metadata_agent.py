@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from qrest_agent.agent.extractor import LLMExtractor, RuleBasedExtractor
+from qrest_agent.agent.tool_registry import ToolRegistry
 from qrest_agent.core.models import Candidate, ValidationReport
 from qrest_agent.core.state import MetadataState
 from qrest_agent.core.validator import validate_state
@@ -31,6 +32,7 @@ class MetadataAgent:
         self.state = MetadataState.empty()
         self.sources = SourceManager()
         self.extractor = LLMExtractor(llm_client) if llm_client is not None else RuleBasedExtractor()
+        self.tools = ToolRegistry()
 
     def ingest_text(self, text: str, source_id: str = "user_message") -> list[SourceChunk]:
         return self.sources.add_text(text, source_id=source_id)
@@ -45,7 +47,12 @@ class MetadataAgent:
         for path in files or []:
             chunks.extend(self.ingest_file(path))
 
-        candidates = self.extractor.extract(chunks)
+        try:
+            candidates = self.extractor.extract(chunks)
+        except Exception:
+            candidates = RuleBasedExtractor().extract(chunks)
+        if not candidates and chunks:
+            candidates = RuleBasedExtractor().extract(chunks)
         self.state.submit_many(candidates)
         report = validate_state(self.state)
         return TurnResult(candidates=candidates, report=report, response=_build_response(report))
@@ -67,4 +74,3 @@ def _build_response(report: ValidationReport) -> str:
     if any(issue.level == "warning" for issue in report.issues):
         return "元数据已基本完整，但仍有警告需要复核。"
     return "元数据已通过校验，可以导出 qREST metadata.json。"
-

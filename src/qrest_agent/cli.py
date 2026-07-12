@@ -9,7 +9,9 @@ from typing import Any
 
 from qrest_agent.agent.metadata_agent import MetadataAgent
 from qrest_agent.core.validator import validate_metadata
-from qrest_agent.llm.clients import OllamaClient, OpenAICompatibleClient
+from qrest_agent.llm.clients import OllamaCliClient, OllamaClient, OpenAICompatibleClient
+from qrest_agent.resources import list_qrest_examples, qrest_docs_root, qrest_tool_path
+from qrest_agent.tools.qrest_data_tools import QrestDataTools
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,13 +23,26 @@ def main(argv: list[str] | None = None) -> int:
 
     extract_parser = subparsers.add_parser("extract-text", help="extract candidates from a text message")
     extract_parser.add_argument("text")
-    extract_parser.add_argument("--provider", choices=["rule", "ollama", "openai-compatible"], default="rule")
+    extract_parser.add_argument("--provider", choices=["rule", "ollama", "ollama-cli", "openai-compatible"], default="rule")
     extract_parser.add_argument("--model", default=os.environ.get("QREST_AGENT_MODEL", "qwen3.5:4b"))
     extract_parser.add_argument("--base-url", default=os.environ.get("QREST_AGENT_BASE_URL", "http://localhost:11434"))
     extract_parser.add_argument("--api-key", default=os.environ.get("QREST_AGENT_API_KEY", ""))
 
     extract_file_parser = subparsers.add_parser("extract-file", help="extract candidates from a supported text file")
     extract_file_parser.add_argument("path")
+
+    resources_parser = subparsers.add_parser("resources", help="list bundled qREST resources")
+    resources_parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
+
+    generate_parser = subparsers.add_parser("generate-qrest", help="generate a .qrest file from metadata JSON and data TXT")
+    generate_parser.add_argument("metadata_json")
+    generate_parser.add_argument("data_txt")
+    generate_parser.add_argument("output_qrest")
+
+    load_parser = subparsers.add_parser("load-qrest", help="extract metadata JSON and data TXT from a .qrest file")
+    load_parser.add_argument("input_qrest")
+    load_parser.add_argument("output_metadata_json")
+    load_parser.add_argument("output_data_txt")
 
     args = parser.parse_args(argv)
     if args.command == "validate":
@@ -36,6 +51,12 @@ def main(argv: list[str] | None = None) -> int:
         return _extract_text(args)
     if args.command == "extract-file":
         return _extract_file(args.path)
+    if args.command == "resources":
+        return _resources(args.json)
+    if args.command == "generate-qrest":
+        return _generate_qrest(args.metadata_json, args.data_txt, args.output_qrest)
+    if args.command == "load-qrest":
+        return _load_qrest(args.input_qrest, args.output_metadata_json, args.output_data_txt)
     return 2
 
 
@@ -60,11 +81,48 @@ def _extract_file(path: str) -> int:
     return 0
 
 
+def _resources(as_json: bool) -> int:
+    payload = {
+        "examples": [str(path) for path in list_qrest_examples()],
+        "docs": str(qrest_docs_root()),
+        "tools": {
+            "data_generator": str(qrest_tool_path("data_generator")),
+            "data_loader": str(qrest_tool_path("data_loader")),
+        },
+    }
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print("Bundled qREST resources")
+        print(f"Docs: {payload['docs']}")
+        print("Examples:")
+        for path in payload["examples"]:
+            print(f"  - {path}")
+        print("Tools:")
+        for name, path in payload["tools"].items():
+            print(f"  - {name}: {path}")
+    return 0
+
+
+def _generate_qrest(metadata_json: str, data_txt: str, output_qrest: str) -> int:
+    result = QrestDataTools().generate_qrest(metadata_json, data_txt, output_qrest)
+    print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    return 0 if result.ok else 1
+
+
+def _load_qrest(input_qrest: str, output_metadata_json: str, output_data_txt: str) -> int:
+    result = QrestDataTools().load_qrest(input_qrest, output_metadata_json, output_data_txt)
+    print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    return 0 if result.ok else 1
+
+
 def _make_client(args: argparse.Namespace) -> Any:
     if args.provider == "rule":
         return None
     if args.provider == "ollama":
         return OllamaClient(model=args.model, base_url=args.base_url)
+    if args.provider == "ollama-cli":
+        return OllamaCliClient(model=args.model)
     if args.provider == "openai-compatible":
         if not args.api_key:
             raise SystemExit("--api-key or QREST_AGENT_API_KEY is required")
@@ -74,4 +132,3 @@ def _make_client(args: argparse.Namespace) -> Any:
 
 if __name__ == "__main__":
     sys.exit(main())
-

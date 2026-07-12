@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 import unittest
-from pathlib import Path
 
 from qrest_agent.core.validator import validate_metadata
+from qrest_agent.resources import qrest_examples_root
 
 
 class ValidatorTests(unittest.TestCase):
     def test_qrest_sample_metadata_is_ready(self) -> None:
-        path = Path("/home/yue/CodeFiles/qrest_data/resource/kunming2/metadata.json")
+        path = qrest_examples_root() / "kunming2" / "metadata.json"
         metadata = json.loads(path.read_text(encoding="utf-8"))
 
         report = validate_metadata(metadata)
@@ -17,7 +17,7 @@ class ValidatorTests(unittest.TestCase):
         self.assertTrue(report.ready, report.to_dict())
 
     def test_missing_required_field_is_reported(self) -> None:
-        metadata = json.loads(Path("/home/yue/CodeFiles/qrest_data/resource/kunming2/metadata.json").read_text(encoding="utf-8"))
+        metadata = json.loads((qrest_examples_root() / "kunming2" / "metadata.json").read_text(encoding="utf-8"))
         del metadata["DataInfo"]["DT"]
 
         report = validate_metadata(metadata)
@@ -26,7 +26,8 @@ class ValidatorTests(unittest.TestCase):
         self.assertIn("DataInfo.DT", report.missing_required)
 
     def test_truncated_sample_reports_channel_count_mismatch(self) -> None:
-        metadata = json.loads(Path("/home/yue/CodeFiles/qrest_data/resource/metadata.json").read_text(encoding="utf-8"))
+        metadata = json.loads((qrest_examples_root() / "kunming2" / "metadata.json").read_text(encoding="utf-8"))
+        metadata["InstrumentInfo"]["Channels"] = metadata["InstrumentInfo"]["Channels"][:3]
 
         report = validate_metadata(metadata)
 
