@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from qrest_agent.agent.extractor import LLMExtractor, RuleBasedExtractor
+from qrest_agent.core.models import Candidate, ValidationReport
+from qrest_agent.core.state import MetadataState
+from qrest_agent.core.validator import validate_state
+from qrest_agent.ingestion.sources import SourceChunk, SourceManager
+from qrest_agent.llm.clients import BaseLLMClient
+
+
+@dataclass(slots=True)
+class TurnResult:
+    candidates: list[Candidate]
+    report: ValidationReport
+    response: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "candidates": [item.to_dict() for item in self.candidates],
+            "report": self.report.to_dict(),
+            "response": self.response,
+        }
+
+
+class MetadataAgent:
+    def __init__(self, llm_client: BaseLLMClient | None = None) -> None:
+        self.state = MetadataState.empty()
+        self.sources = SourceManager()
+        self.extractor = LLMExtractor(llm_client) if llm_client is not None else RuleBasedExtractor()
+
+    def ingest_text(self, text: str, source_id: str = "user_message") -> list[SourceChunk]:
+        return self.sources.add_text(text, source_id=source_id)
+
+    def ingest_file(self, path: str | Path) -> list[SourceChunk]:
+        return self.sources.add_file(path)
+
+    def run_turn(self, text: str | None = None, files: list[str | Path] | None = None) -> TurnResult:
+        chunks: list[SourceChunk] = []
+        if text:
+            chunks.extend(self.ingest_text(text))
+        for path in files or []:
+            chunks.extend(self.ingest_file(path))
+
+        candidates = self.extractor.extract(chunks)
+        self.state.submit_many(candidates)
+        report = validate_state(self.state)
+        return TurnResult(candidates=candidates, report=report, response=_build_response(report))
+
+    def export_metadata(self, include_reserved_analysis: bool = True) -> dict[str, Any]:
+        report = validate_state(self.state)
+        if not report.ready:
+            missing = ", ".join(report.missing_required)
+            conflicts = ", ".join(report.conflicts)
+            raise ValueError(f"metadata is not ready; missing=[{missing}], conflicts=[{conflicts}]")
+        return self.state.to_metadata(include_reserved_analysis=include_reserved_analysis)
+
+
+def _build_response(report: ValidationReport) -> str:
+    if report.conflicts:
+        return "发现字段存在冲突，请确认：" + "，".join(report.conflicts)
+    if report.missing_required:
+        return "当前仍缺少必要信息：" + "，".join(report.missing_required)
+    if any(issue.level == "warning" for issue in report.issues):
+        return "元数据已基本完整，但仍有警告需要复核。"
+    return "元数据已通过校验，可以导出 qREST metadata.json。"
+

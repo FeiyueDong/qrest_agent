@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qrest-agent"
+version = "0.1.0"
+description = "AI-assisted qREST metadata acquisition agent"
+requires-python = ">=3.12"
+readme = "README.md"
+dependencies = []
+
+[project.optional-dependencies]
+api = ["fastapi>=0.115", "uvicorn>=0.30"]
+openai = ["openai>=1.0"]
+docs = ["pymupdf>=1.24", "python-docx>=1.1", "openpyxl>=3.1"]
+
+[project.scripts]
+qrest-agent = "qrest_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
