@@ -46,6 +46,31 @@ env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli benchmark-extraction \
 
 Current local-model notes are tracked in [docs/llm_models.md](docs/llm_models.md).
 
+## Command-Line Dialogue
+
+For a deterministic smoke test:
+
+```bash
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli chat
+```
+
+For local-model testing with Ollama:
+
+```bash
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli chat \
+  --provider ollama-cli \
+  --model qwen3:4b-instruct \
+  --transcript test_outputs/dialogue/manual_chat_transcript.json
+```
+
+Useful commands inside the chat:
+
+- `/state`
+- `/missing`
+- `/conflicts`
+- `/confirm Field.Path value`
+- `/quit`
+
 ## Bundled qREST Resources
 
 The project carries a local qREST reference bundle under `resources/qrest_data/`:

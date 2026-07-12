@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from qrest_agent.agent.dialogue import ChatSession
 from qrest_agent.agent.metadata_agent import MetadataAgent
 from qrest_agent.core.validator import validate_metadata
 from qrest_agent.ingestion.sources import SourceManager
@@ -33,13 +34,26 @@ def main(argv: list[str] | None = None) -> int:
     extract_parser = subparsers.add_parser("extract-text", help="extract candidates from a text message")
     extract_parser.add_argument("text")
     extract_parser.add_argument("--provider", choices=["rule", "ollama", "ollama-cli", "openai-compatible"], default="rule")
-    extract_parser.add_argument("--model", default=os.environ.get("QREST_AGENT_MODEL", "qwen3.5:4b"))
+    extract_parser.add_argument("--model", default=os.environ.get("QREST_AGENT_MODEL", "qwen3:4b-instruct"))
     extract_parser.add_argument("--base-url", default=os.environ.get("QREST_AGENT_BASE_URL", "http://localhost:11434"))
     extract_parser.add_argument("--api-key", default=os.environ.get("QREST_AGENT_API_KEY", ""))
 
+    chat_parser = subparsers.add_parser("chat", help="start a simple command-line metadata dialogue")
+    chat_parser.add_argument("--provider", choices=["rule", "ollama", "ollama-cli", "openai-compatible"], default="rule")
+    chat_parser.add_argument("--model", default=os.environ.get("QREST_AGENT_MODEL", "qwen3:4b-instruct"))
+    chat_parser.add_argument("--base-url", default=os.environ.get("QREST_AGENT_BASE_URL", "http://localhost:11434"))
+    chat_parser.add_argument("--api-key", default=os.environ.get("QREST_AGENT_API_KEY", ""))
+    chat_parser.add_argument(
+        "--message",
+        action="append",
+        default=[],
+        help="run one dialogue turn; can be passed multiple times for scripted tests",
+    )
+    chat_parser.add_argument("--transcript", help="optional path to write the dialogue transcript JSON")
+
     benchmark_parser = subparsers.add_parser("benchmark-extraction", help="run extraction benchmark cases")
     benchmark_parser.add_argument("--provider", choices=["rule", "ollama", "ollama-cli", "openai-compatible"], default="rule")
-    benchmark_parser.add_argument("--model", default=os.environ.get("QREST_AGENT_MODEL", "qwen3.5:4b"))
+    benchmark_parser.add_argument("--model", default=os.environ.get("QREST_AGENT_MODEL", "qwen3:4b-instruct"))
     benchmark_parser.add_argument("--base-url", default=os.environ.get("QREST_AGENT_BASE_URL", "http://localhost:11434"))
     benchmark_parser.add_argument("--api-key", default=os.environ.get("QREST_AGENT_API_KEY", ""))
     benchmark_parser.add_argument("--output", help="optional path to write benchmark JSON")
@@ -76,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
         return _validate(args.metadata_json)
     if args.command == "extract-text":
         return _extract_text(args)
+    if args.command == "chat":
+        return _chat(args)
     if args.command == "benchmark-extraction":
         return _benchmark_extraction(args)
     if args.command == "extract-file":
@@ -104,6 +120,31 @@ def _extract_text(args: argparse.Namespace) -> int:
     agent = MetadataAgent(llm_client=_make_client(args))
     result = agent.run_turn(text=args.text)
     print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    return 0
+
+
+def _chat(args: argparse.Namespace) -> int:
+    agent = MetadataAgent(llm_client=_make_client(args))
+    session = ChatSession(agent)
+    if args.message:
+        for message in args.message:
+            result = session.handle(message)
+            print(f"> {message}")
+            print(result.response)
+        _write_transcript(args.transcript, session)
+        return 0
+
+    print("qREST Agent chat. 输入 /help 查看命令，输入 /quit 结束。")
+    while True:
+        try:
+            message = input("> ")
+        except EOFError:
+            break
+        result = session.handle(message)
+        print(result.response)
+        if message.strip().lower() in {"/quit", "/exit"}:
+            break
+    _write_transcript(args.transcript, session)
     return 0
 
 
@@ -195,6 +236,14 @@ def _benchmark_extraction(args: argparse.Namespace) -> int:
         Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
+
+
+def _write_transcript(path: str | None, session: ChatSession) -> None:
+    if not path:
+        return
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(session.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _make_client(args: argparse.Namespace) -> Any:

@@ -32,6 +32,19 @@ env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli benchmark-extraction \
 
 The detailed artifacts are saved under `test_outputs/llm/` for manual review.
 
+The command-line dialogue path has also been smoke-tested with `qwen3:4b-instruct`:
+
+```bash
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli chat \
+  --provider ollama-cli \
+  --model qwen3:4b-instruct \
+  --message "项目名称为 DemoBuilding。事件名称为 2025_TEST_EVENT。采样时间间隔：0.02 s。数据点数：30000。" \
+  --message "/state" \
+  --transcript test_outputs/dialogue/qwen3_chat_transcript.json
+```
+
+This smoke test extracted `BuildingInfo.ProjectName`, `DataInfo.EventName`, and `DataInfo.DT`, then reported the remaining missing required fields.
+
 ## Current Recommendation
 
 Use the rule-based extractor as the reliability fallback and use `qwen3:4b-instruct` as the first local LLM candidate for continued testing.

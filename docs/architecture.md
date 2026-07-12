@@ -66,3 +66,16 @@ These tools are intentionally kept separate from LLM extraction. The model may r
 - XLSX: reads worksheet XML and shared strings directly and records sheet/chunk locations.
 
 The ingestion layer extracts text only. Candidate generation remains a separate extractor step so that deterministic validation and evidence tracking stay independent from file parsing.
+
+## Dialogue Shell
+
+The first dialogue interface is a command-line shell exposed by `qrest_agent.cli chat`.
+
+It supports two modes:
+
+- interactive input from a terminal;
+- scripted `--message` turns for tests and reproducible smoke runs.
+
+The shell keeps one in-memory `ChatSession` per process. Each turn can extract candidates, update metadata state, print missing/conflict prompts, and accept explicit user confirmation through `/confirm Field.Path value`.
+
+This is not yet a full natural-language correction system. For important corrections, the user should use explicit `/confirm` commands so that the deterministic state layer receives a confirmed candidate with clear evidence.

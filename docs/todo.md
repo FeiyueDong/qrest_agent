@@ -78,12 +78,12 @@ Acceptance:
 
 ## Phase 4: Dialogue Workflow
 
-- [ ] Add session state storage for multi-turn interaction.
-- [ ] Add commands to inspect current metadata state.
-- [ ] Generate human-readable questions for missing fields.
-- [ ] Generate human-readable questions for conflicts.
-- [ ] Support user confirmation and correction of candidate values.
-- [ ] Add a conversation transcript to the audit trail.
+- [x] Add session state storage for multi-turn interaction.
+- [x] Add commands to inspect current metadata state.
+- [x] Generate human-readable questions for missing fields.
+- [x] Generate human-readable questions for conflicts.
+- [x] Support user confirmation and correction of candidate values.
+- [x] Add a conversation transcript to the audit trail.
 
 Acceptance:
 
@@ -135,8 +135,8 @@ Acceptance:
 
 ## Immediate Next Tasks
 
-1. Add session state storage for multi-turn interaction.
-2. Add commands to inspect current metadata state.
-3. Generate human-readable questions for missing fields and conflicts.
-4. Support user confirmation and correction of candidate values.
-5. Add preflight checks around qREST data tool calls.
+1. Exercise the CLI dialogue manually with `qwen3:4b-instruct`.
+2. Add file attachment support inside the interactive chat loop.
+3. Add persistent session reload if multi-day dialogue sessions become necessary.
+4. Add preflight checks around qREST data tool calls.
+5. Add tool-dispatch from dialogue intent to qREST data tools.
