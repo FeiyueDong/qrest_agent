@@ -21,6 +21,14 @@ env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli validate resources/qrest_
 env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli extract-text "项目名为 Demo，大楼高度 62.5m，采样间隔 0.02s。"
 ```
 
+## Tests
+
+```bash
+.venv/bin/python -m pytest
+```
+
+Tests write human-readable artifacts to `test_outputs/` for manual review. See [docs/testing.md](docs/testing.md).
+
 ## Bundled qREST Resources
 
 The project carries a local qREST reference bundle under `resources/qrest_data/`:

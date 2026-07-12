@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import unittest
 import json
-import tempfile
 from pathlib import Path
 from typing import Any
 
 from qrest_agent.agent.metadata_agent import MetadataAgent
 from qrest_agent.resources import qrest_examples_root
+from tests.conftest import write_json
 
 
 class BadLLMClient:
@@ -34,59 +33,70 @@ class UnknownPathLLMClient:
         }
 
 
-class MetadataAgentTests(unittest.TestCase):
-    def test_rule_based_turn_reports_missing_fields(self) -> None:
-        agent = MetadataAgent()
-        result = agent.run_turn("项目名称为 DemoBuilding。采样间隔为 0.02s。")
+def test_rule_based_turn_reports_missing_fields(artifact_dir: Path) -> None:
+    agent = MetadataAgent()
+    result = agent.run_turn("项目名称为 DemoBuilding。采样间隔为 0.02s。")
 
-        self.assertIn("BuildingInfo.ProjectName", [item.field_path for item in result.candidates])
-        self.assertFalse(result.report.ready)
-        self.assertIn("BuildingInfo.StructuralType", result.report.missing_required)
+    write_json(artifact_dir / "agent" / "rule_based_missing_turn.json", result.to_dict())
 
-    def test_bad_llm_falls_back_to_rule_based_extractor(self) -> None:
-        agent = MetadataAgent(llm_client=BadLLMClient())
-        result = agent.run_turn("项目名称为 DemoBuilding。")
-
-        self.assertIn("BuildingInfo.ProjectName", [item.field_path for item in result.candidates])
-
-    def test_unknown_llm_field_path_falls_back_to_rule_based_extractor(self) -> None:
-        agent = MetadataAgent(llm_client=UnknownPathLLMClient())
-        result = agent.run_turn("项目名称为 DemoBuilding。")
-
-        self.assertIn("BuildingInfo.ProjectName", [item.field_path for item in result.candidates])
-        self.assertNotIn("TestTower", agent.state.records)
-
-    def test_export_artifacts_writes_metadata_and_audit_when_ready(self) -> None:
-        agent = MetadataAgent()
-        agent.run_turn(files=[qrest_examples_root() / "kunming2" / "metadata.json"])
-        with tempfile.TemporaryDirectory() as tempdir:
-            metadata_path = Path(tempdir) / "metadata.json"
-            audit_path = Path(tempdir) / "audit.json"
-
-            report = agent.export_artifacts(metadata_path, audit_path)
-
-            self.assertTrue(report.ready, report.to_dict())
-            self.assertTrue(metadata_path.exists())
-            self.assertTrue(audit_path.exists())
-            audit = json.loads(audit_path.read_text(encoding="utf-8"))
-            self.assertTrue(audit["ready"])
-            self.assertIn("BuildingInfo.ProjectName", audit["records"])
-
-    def test_export_artifacts_writes_only_audit_when_not_ready(self) -> None:
-        agent = MetadataAgent()
-        agent.run_turn("项目名称为 DemoBuilding。")
-        with tempfile.TemporaryDirectory() as tempdir:
-            metadata_path = Path(tempdir) / "metadata.json"
-            audit_path = Path(tempdir) / "audit.json"
-
-            report = agent.export_artifacts(metadata_path, audit_path)
-
-            self.assertFalse(report.ready)
-            self.assertFalse(metadata_path.exists())
-            self.assertTrue(audit_path.exists())
-            audit = json.loads(audit_path.read_text(encoding="utf-8"))
-            self.assertFalse(audit["ready"])
+    assert "BuildingInfo.ProjectName" in [item.field_path for item in result.candidates]
+    assert not result.report.ready
+    assert "BuildingInfo.StructuralType" in result.report.missing_required
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_bad_llm_falls_back_to_rule_based_extractor(artifact_dir: Path) -> None:
+    agent = MetadataAgent(llm_client=BadLLMClient())
+    result = agent.run_turn("项目名称为 DemoBuilding。")
+
+    write_json(artifact_dir / "agent" / "bad_llm_fallback_turn.json", result.to_dict())
+
+    assert "BuildingInfo.ProjectName" in [item.field_path for item in result.candidates]
+
+
+def test_unknown_llm_field_path_falls_back_to_rule_based_extractor(artifact_dir: Path) -> None:
+    agent = MetadataAgent(llm_client=UnknownPathLLMClient())
+    result = agent.run_turn("项目名称为 DemoBuilding。")
+
+    write_json(artifact_dir / "agent" / "unknown_path_fallback_turn.json", result.to_dict())
+
+    assert "BuildingInfo.ProjectName" in [item.field_path for item in result.candidates]
+    assert "TestTower" not in agent.state.records
+
+
+def test_export_artifacts_writes_metadata_and_audit_when_ready(tmp_path: Path, artifact_dir: Path) -> None:
+    agent = MetadataAgent()
+    agent.run_turn(files=[qrest_examples_root() / "kunming2" / "metadata.json"])
+    metadata_path = tmp_path / "metadata.json"
+    audit_path = tmp_path / "audit.json"
+
+    report = agent.export_artifacts(metadata_path, audit_path)
+
+    output_metadata = artifact_dir / "agent" / "ready_metadata.json"
+    output_audit = artifact_dir / "agent" / "ready_audit.json"
+    output_metadata.write_text(metadata_path.read_text(encoding="utf-8"), encoding="utf-8")
+    output_audit.write_text(audit_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    assert report.ready, report.to_dict()
+    assert metadata_path.exists()
+    assert audit_path.exists()
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert audit["ready"]
+    assert "BuildingInfo.ProjectName" in audit["records"]
+
+
+def test_export_artifacts_writes_only_audit_when_not_ready(tmp_path: Path, artifact_dir: Path) -> None:
+    agent = MetadataAgent()
+    agent.run_turn("项目名称为 DemoBuilding。")
+    metadata_path = tmp_path / "metadata.json"
+    audit_path = tmp_path / "audit.json"
+
+    report = agent.export_artifacts(metadata_path, audit_path)
+
+    output_audit = artifact_dir / "agent" / "not_ready_audit.json"
+    output_audit.write_text(audit_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    assert not report.ready
+    assert not metadata_path.exists()
+    assert audit_path.exists()
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert not audit["ready"]
