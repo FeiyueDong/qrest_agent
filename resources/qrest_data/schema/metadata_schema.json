@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qrest.local/schema/metadata.schema.json",
+  "title": "qREST Metadata",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["Header", "Version", "Units", "BuildingInfo", "InstrumentInfo", "DataInfo"],
+  "properties": {
+    "Header": {
+      "const": "qREST_DATA"
+    },
+    "Version": {
+      "type": "array",
+      "prefixItems": [{"type": "integer"}, {"type": "integer"}, {"type": "integer"}],
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "Units": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 2
+    },
+    "BuildingInfo": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["ProjectName", "GeoLocation", "StructuralType", "StructuralFootprint", "ElevationNum", "Elevation"],
+      "properties": {
+        "ProjectName": {"type": "string"},
+        "GeoLocation": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["Longitude", "Latitude", "NorthAngle"],
+          "properties": {
+            "Longitude": {"type": "number"},
+            "Latitude": {"type": "number"},
+            "NorthAngle": {"type": "number"}
+          }
+        },
+        "StructuralType": {"type": "string"},
+        "StructuralFootprint": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["Shape", "Parameters", "BoundingBox"],
+          "properties": {
+            "Shape": {"type": "string"},
+            "Parameters": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "BoundingBox": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": ["MaxX", "MinX", "MaxY", "MinY"],
+              "properties": {
+                "MaxX": {"type": "number"},
+                "MinX": {"type": "number"},
+                "MaxY": {"type": "number"},
+                "MinY": {"type": "number"}
+              }
+            }
+          }
+        },
+        "ElevationNum": {"type": "integer"},
+        "Elevation": {
+          "type": "array",
+          "items": {"type": "number"}
+        }
+      }
+    },
+    "InstrumentInfo": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["Provider", "ChannelNum", "Channels"],
+      "properties": {
+        "Provider": {"type": "string"},
+        "ChannelNum": {"type": "integer"},
+        "Channels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["ChannelNo", "ChannelID", "Measurand", "Scale", "Azimuth", "LocationXYZ"],
+            "properties": {
+              "ChannelNo": {"type": "integer"},
+              "ChannelID": {"type": "string"},
+              "Measurand": {"type": "string"},
+              "Scale": {"type": "number"},
+              "Azimuth": {"type": "number"},
+              "LocationXYZ": {
+                "type": "array",
+                "prefixItems": [{"type": "number"}, {"type": "number"}, {"type": "number"}],
+                "minItems": 3,
+                "maxItems": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "DataInfo": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["EventName", "StartTime", "NPTS", "DT", "Corrected"],
+      "properties": {
+        "EventName": {"type": "string"},
+        "StartTime": {"type": "string"},
+        "NPTS": {"type": "integer"},
+        "DT": {"type": "number"},
+        "Corrected": {"type": "string"}
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "method": {},
+        "parameters": {"type": "object"},
+        "status": {"type": "string"}
+      }
+    }
+  }
+}

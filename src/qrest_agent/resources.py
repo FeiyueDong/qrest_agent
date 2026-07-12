@@ -28,6 +28,10 @@ def qrest_docs_root() -> Path:
     return qrest_data_root() / "docs"
 
 
+def qrest_schema_path() -> Path:
+    return qrest_data_root() / "schema" / "metadata_schema.json"
+
+
 def qrest_tool_path(tool_name: str) -> Path:
     system = platform.system().lower()
     if system != "linux":
@@ -43,4 +47,3 @@ def list_qrest_examples() -> list[Path]:
     if not root.exists():
         return []
     return sorted(path for path in root.iterdir() if path.is_dir())
-

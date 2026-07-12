@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import unittest
 
+from qrest_agent.core.schema import QREST_EXTENSION_POLICY, QREST_FIELD_SPECS, QREST_REQUIRED_PATHS
 from qrest_agent.core.validator import validate_metadata
-from qrest_agent.resources import qrest_examples_root
+from qrest_agent.resources import qrest_examples_root, qrest_schema_path
 
 
 class ValidatorTests(unittest.TestCase):
@@ -36,6 +37,15 @@ class ValidatorTests(unittest.TestCase):
             any(issue.field_path == "InstrumentInfo.ChannelNum" for issue in report.issues),
             report.to_dict(),
         )
+
+    def test_formal_schema_resource_exists_and_matches_required_paths(self) -> None:
+        schema = json.loads(qrest_schema_path().read_text(encoding="utf-8"))
+
+        self.assertEqual(schema["properties"]["Header"]["const"], "qREST_DATA")
+        self.assertIn("additionalProperties", schema)
+        self.assertIn("BuildingInfo.ProjectName", QREST_REQUIRED_PATHS)
+        self.assertEqual(len(QREST_FIELD_SPECS), len(QREST_REQUIRED_PATHS))
+        self.assertIn("Unknown fields are preserved", QREST_EXTENSION_POLICY)
 
 
 if __name__ == "__main__":

@@ -9,12 +9,13 @@ from qrest_agent.core.schema import DEFAULT_METADATA, QREST_REQUIRED_PATHS
 
 
 class MetadataState:
-    def __init__(self, records: dict[str, FieldRecord] | None = None) -> None:
+    def __init__(self, records: dict[str, FieldRecord] | None = None, base_metadata: dict[str, Any] | None = None) -> None:
         self.records = records or {}
+        self.base_metadata = deepcopy(base_metadata) if base_metadata is not None else deepcopy(DEFAULT_METADATA)
 
     @classmethod
     def empty(cls) -> "MetadataState":
-        state = cls()
+        state = cls(base_metadata=DEFAULT_METADATA)
         for path in ("Header", "Version", "Units"):
             value = get_path(DEFAULT_METADATA, path)
             state.records[path] = FieldRecord(
@@ -27,7 +28,7 @@ class MetadataState:
 
     @classmethod
     def from_metadata(cls, metadata: dict[str, Any], source_id: str = "metadata") -> "MetadataState":
-        state = cls.empty()
+        state = cls(base_metadata=metadata)
         for path in QREST_REQUIRED_PATHS:
             value = get_path(metadata, path)
             if value is not None:
@@ -98,9 +99,11 @@ class MetadataState:
             self.submit(candidate)
 
     def to_metadata(self, include_reserved_analysis: bool = True) -> dict[str, Any]:
-        metadata = deepcopy(DEFAULT_METADATA if include_reserved_analysis else {})
+        metadata = deepcopy(self.base_metadata)
+        if include_reserved_analysis and "analysis" not in metadata:
+            metadata["analysis"] = deepcopy(DEFAULT_METADATA["analysis"])
         if not include_reserved_analysis:
-            metadata.update({"Header": None, "Version": None, "Units": None})
+            metadata.pop("analysis", None)
 
         for path, record in self.records.items():
             if record.status in {"empty", "missing", "conflict"}:
@@ -110,4 +113,3 @@ class MetadataState:
 
     def to_audit_dict(self) -> dict[str, Any]:
         return {path: record.to_dict() for path, record in sorted(self.records.items())}
-

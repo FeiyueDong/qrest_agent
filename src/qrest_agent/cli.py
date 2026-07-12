@@ -10,7 +10,7 @@ from typing import Any
 from qrest_agent.agent.metadata_agent import MetadataAgent
 from qrest_agent.core.validator import validate_metadata
 from qrest_agent.llm.clients import OllamaCliClient, OllamaClient, OpenAICompatibleClient
-from qrest_agent.resources import list_qrest_examples, qrest_docs_root, qrest_tool_path
+from qrest_agent.resources import list_qrest_examples, qrest_docs_root, qrest_schema_path, qrest_tool_path
 from qrest_agent.tools.qrest_data_tools import QrestDataTools
 
 
@@ -30,6 +30,14 @@ def main(argv: list[str] | None = None) -> int:
 
     extract_file_parser = subparsers.add_parser("extract-file", help="extract candidates from a supported text file")
     extract_file_parser.add_argument("path")
+
+    export_file_parser = subparsers.add_parser(
+        "export-from-file",
+        help="extract from a supported file and export metadata plus audit trail when ready",
+    )
+    export_file_parser.add_argument("path")
+    export_file_parser.add_argument("metadata_output")
+    export_file_parser.add_argument("audit_output")
 
     resources_parser = subparsers.add_parser("resources", help="list bundled qREST resources")
     resources_parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
@@ -51,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
         return _extract_text(args)
     if args.command == "extract-file":
         return _extract_file(args.path)
+    if args.command == "export-from-file":
+        return _export_from_file(args.path, args.metadata_output, args.audit_output)
     if args.command == "resources":
         return _resources(args.json)
     if args.command == "generate-qrest":
@@ -81,10 +91,25 @@ def _extract_file(path: str) -> int:
     return 0
 
 
+def _export_from_file(path: str, metadata_output: str, audit_output: str) -> int:
+    agent = MetadataAgent()
+    result = agent.run_turn(files=[path])
+    report = agent.export_artifacts(metadata_output, audit_output)
+    payload = {
+        "response": result.response,
+        "report": report.to_dict(),
+        "metadata_output": metadata_output if report.ready else None,
+        "audit_output": audit_output,
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0 if report.ready else 1
+
+
 def _resources(as_json: bool) -> int:
     payload = {
         "examples": [str(path) for path in list_qrest_examples()],
         "docs": str(qrest_docs_root()),
+        "schema": str(qrest_schema_path()),
         "tools": {
             "data_generator": str(qrest_tool_path("data_generator")),
             "data_loader": str(qrest_tool_path("data_loader")),
@@ -95,6 +120,7 @@ def _resources(as_json: bool) -> int:
     else:
         print("Bundled qREST resources")
         print(f"Docs: {payload['docs']}")
+        print(f"Schema: {payload['schema']}")
         print("Examples:")
         for path in payload["examples"]:
             print(f"  - {path}")

@@ -65,6 +65,22 @@ class MetadataAgent:
             raise ValueError(f"metadata is not ready; missing=[{missing}], conflicts=[{conflicts}]")
         return self.state.to_metadata(include_reserved_analysis=include_reserved_analysis)
 
+    def export_audit(self) -> dict[str, Any]:
+        report = validate_state(self.state)
+        return {
+            "ready": report.ready,
+            "validation": report.to_dict(),
+            "records": self.state.to_audit_dict(),
+            "tool_specs": [spec.to_dict() for spec in self.tools.list_specs()],
+        }
+
+    def export_artifacts(self, metadata_path: str | Path, audit_path: str | Path) -> ValidationReport:
+        report = validate_state(self.state)
+        Path(audit_path).write_text(_to_json(self.export_audit()), encoding="utf-8")
+        if report.ready:
+            Path(metadata_path).write_text(_to_json(self.export_metadata()), encoding="utf-8")
+        return report
+
 
 def _build_response(report: ValidationReport) -> str:
     if report.conflicts:
@@ -74,3 +90,9 @@ def _build_response(report: ValidationReport) -> str:
     if any(issue.level == "warning" for issue in report.issues):
         return "元数据已基本完整，但仍有警告需要复核。"
     return "元数据已通过校验，可以导出 qREST metadata.json。"
+
+
+def _to_json(data: dict[str, Any]) -> str:
+    import json
+
+    return json.dumps(data, ensure_ascii=False, indent=2)
