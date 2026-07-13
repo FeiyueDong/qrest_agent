@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from qrest_agent.resources import qrest_examples_root, qrest_tool_path
-from qrest_agent.tools.qrest_data_tools import QrestDataTools
+from qrest_agent.tools.qrest_data_tools import QrestDataTools, inspect_data_txt, preflight_generate_qrest
 from tests.conftest import write_json
 
 
@@ -23,7 +23,12 @@ def test_load_qrest_exports_metadata_and_data(tmp_path: Path, artifact_dir: Path
     output_metadata = tmp_path / "metadata.json"
     output_data = tmp_path / "data.txt"
 
-    result = QrestDataTools().load_qrest(example, output_metadata, output_data)
+    result = QrestDataTools().load_qrest(
+        example,
+        output_metadata,
+        output_data,
+        compare_metadata_json=qrest_examples_root() / "kunming2" / "metadata.json",
+    )
 
     artifact_metadata = artifact_dir / "tools" / "loaded_metadata.json"
     artifact_data = artifact_dir / "tools" / "loaded_data_head.txt"
@@ -44,6 +49,8 @@ def test_load_qrest_exports_metadata_and_data(tmp_path: Path, artifact_dir: Path
     assert output_data.exists()
     assert output_metadata.stat().st_size > 0
     assert output_data.stat().st_size > 0
+    assert "readable" in result.summary
+    assert "metadata_comparison" in result.summary
 
 
 def test_generate_qrest_creates_file(tmp_path: Path, artifact_dir: Path) -> None:
@@ -65,3 +72,36 @@ def test_generate_qrest_creates_file(tmp_path: Path, artifact_dir: Path) -> None
     assert result.ok, result.to_dict()
     assert output_qrest.exists()
     assert output_qrest.stat().st_size > 0
+    assert any("DataInfo.NPTS" in warning for warning in result.warnings)
+
+
+def test_preflight_reports_data_metadata_mismatch(artifact_dir: Path) -> None:
+    example_dir = qrest_examples_root() / "kunming2"
+
+    report = preflight_generate_qrest(example_dir / "metadata.json", example_dir / "data.txt")
+    profile = inspect_data_txt(example_dir / "data.txt")
+
+    write_json(artifact_dir / "tools" / "generate_qrest_preflight_report.json", report.to_dict())
+
+    assert report.ready
+    assert profile.channel_count == 18
+    assert profile.row_count == 12000
+    assert any("DataInfo.NPTS=30000" in warning for warning in report.warnings)
+
+
+def test_generate_qrest_strict_blocks_warnings(tmp_path: Path, artifact_dir: Path) -> None:
+    example_dir = qrest_examples_root() / "kunming2"
+    output_qrest = tmp_path / "blocked.qrest"
+
+    result = QrestDataTools().generate_qrest(
+        example_dir / "metadata.json",
+        example_dir / "data.txt",
+        output_qrest,
+        strict=True,
+    )
+
+    write_json(artifact_dir / "tools" / "generate_qrest_strict_result.json", result.to_dict())
+
+    assert not result.ok
+    assert not output_qrest.exists()
+    assert result.errors

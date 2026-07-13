@@ -56,6 +56,18 @@ Provider-specific SDKs can be added behind the same `complete_json()` boundary.
 
 These tools are intentionally kept separate from LLM extraction. The model may request a conversion, but the conversion itself is performed by the bundled command-line tools and returns a structured `ToolResult`.
 
+`generate_qrest` performs deterministic preflight checks before running the binary:
+
+- qREST metadata validation;
+- `data.txt` row count;
+- first-row channel count;
+- malformed row and non-numeric row checks;
+- comparison against `DataInfo.NPTS` and `InstrumentInfo.ChannelNum`.
+
+Mismatches are returned as warnings unless strict mode is enabled. This keeps existing imperfect engineering examples usable while still surfacing problems to the user.
+
+`load_qrest` returns a readable summary of the parsed metadata and data profile. It can also compare loaded metadata against a reference metadata JSON.
+
 ## Source Ingestion
 
 `SourceManager` converts uploaded materials into `SourceChunk` records with stable source IDs and locations:
@@ -78,4 +90,25 @@ It supports two modes:
 
 The shell keeps one in-memory `ChatSession` per process. Each turn can extract candidates, update metadata state, print missing/conflict prompts, and accept explicit user confirmation through `/confirm Field.Path value`.
 
+The shell also exposes deterministic tool commands:
+
+- `/file path` ingests a local file into the metadata workflow;
+- `/tools` lists available deterministic tools;
+- `/load-qrest input.qrest [source_metadata.json]` parses a binary qREST file into session artifacts;
+- `/generate-qrest metadata.json data.txt [output.qrest]` generates a qREST file and surfaces preflight warnings.
+
 This is not yet a full natural-language correction system. For important corrections, the user should use explicit `/confirm` commands so that the deterministic state layer receives a confirmed candidate with clear evidence.
+
+## API Surface
+
+The project now exposes an `ApiService` in `qrest_agent.api.service`.
+
+The service provides the stable boundary used by future web clients:
+
+- create and inspect sessions;
+- send chat messages;
+- upload text files into a session;
+- execute deterministic tools through the same `ToolRegistry` used by the CLI;
+- list and read session artifacts.
+
+`qrest_agent.api.app.create_app()` is an optional FastAPI wrapper around this service. FastAPI is not a required runtime dependency for the core package; install the optional `api` extras before serving the HTTP app.

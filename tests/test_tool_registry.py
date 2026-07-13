@@ -35,3 +35,22 @@ def test_executes_load_qrest(tmp_path: Path, artifact_dir: Path) -> None:
     write_json(artifact_dir / "tools" / "registry_load_qrest_result.json", payload)
 
     assert result.ok, result.to_dict()
+
+
+def test_executes_tool_with_session_artifacts(tmp_path: Path, artifact_dir: Path) -> None:
+    registry = ToolRegistry(artifact_root=tmp_path / "artifacts")
+
+    result = registry.execute(
+        "load_qrest",
+        {
+            "session_id": "session-a",
+            "input_qrest": qrest_examples_root() / "kunming2" / "kunming2.qrest",
+        },
+    )
+    payload = result.to_dict()
+    payload["managed_artifacts"] = registry.artifacts.list("session-a")
+    write_json(artifact_dir / "tools" / "registry_session_artifacts_result.json", payload)
+
+    assert result.ok, result.to_dict()
+    assert (tmp_path / "artifacts" / "session-a" / "loaded_metadata.json").exists()
+    assert (tmp_path / "artifacts" / "session-a" / "loaded_data.txt").exists()

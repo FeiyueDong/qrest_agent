@@ -1,6 +1,5 @@
-"""Reserved API package.
+"""API service and optional FastAPI app for qREST Agent."""
 
-The first scaffold keeps the deterministic core dependency-free. FastAPI routes
-can be added here once the web surface is ready.
-"""
+from qrest_agent.api.service import ApiService
 
+__all__ = ["ApiService"]

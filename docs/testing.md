@@ -28,7 +28,12 @@ Important files include:
 - `test_outputs/tools/loaded_metadata.json`
 - `test_outputs/tools/loaded_data_head.txt`
 - `test_outputs/tools/generate_qrest_result.json`
+- `test_outputs/tools/generate_qrest_preflight_report.json`
+- `test_outputs/tools/generate_qrest_strict_result.json`
 - `test_outputs/tools/generated.qrest`
+- `test_outputs/tools/registry_session_artifacts_result.json`
+- `test_outputs/api/service_chat_upload_artifacts.json`
+- `test_outputs/api/service_tool_result.json`
 - `test_outputs/ingestion/docx_chunks.json`
 - `test_outputs/ingestion/pdf_chunks.json`
 - `test_outputs/ingestion/docx_text.txt`
@@ -40,6 +45,9 @@ Important files include:
 - `test_outputs/dialogue/cli_chat_transcript.json`
 - `test_outputs/dialogue/cli_chat_output.txt`
 - `test_outputs/dialogue/qwen3_chat_transcript.json`
+- `test_outputs/dialogue/file_command_result.json`
+- `test_outputs/dialogue/tool_command_transcript.json`
+- `test_outputs/dialogue/phase56_cli_tool_transcript.json`
 - `test_outputs/llm/benchmark_case_summary.json`
 - `test_outputs/llm/rule_benchmark.json`
 - `test_outputs/llm/deepseek-r1_1.5b_benchmark.json`

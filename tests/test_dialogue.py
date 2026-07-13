@@ -4,7 +4,10 @@ import json
 from pathlib import Path
 
 from qrest_agent.agent.dialogue import ChatSession
+from qrest_agent.agent.metadata_agent import MetadataAgent
+from qrest_agent.agent.tool_registry import ToolRegistry
 from qrest_agent.cli import main
+from qrest_agent.resources import qrest_examples_root
 from tests.conftest import write_json, write_text
 
 
@@ -74,3 +77,35 @@ def test_cli_chat_scripted_messages_write_transcript(tmp_path: Path, artifact_di
     assert "> /state" in captured.out
     assert payload["turns"]
     assert "DataInfo.NPTS" in payload["records"]
+
+
+def test_chat_session_file_command_ingests_document(artifact_dir: Path) -> None:
+    session = ChatSession()
+
+    result = session.handle(f"/file {qrest_examples_root() / 'kunming2' / 'metadata.json'}")
+
+    write_json(artifact_dir / "dialogue" / "file_command_result.json", result.to_dict())
+
+    assert result.report.ready
+    assert "BuildingInfo.ProjectName" in session.agent.state.records
+
+
+def test_chat_session_tool_commands_use_registry(tmp_path: Path, artifact_dir: Path) -> None:
+    agent = MetadataAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
+    session = ChatSession(agent, session_id="dialogue-tools")
+
+    tools_result = session.handle("/tools")
+    load_result = session.handle(f"/load-qrest {qrest_examples_root() / 'kunming2' / 'kunming2.qrest'}")
+    generate_result = session.handle(
+        f"/generate-qrest {qrest_examples_root() / 'kunming2' / 'metadata.json'} {qrest_examples_root() / 'kunming2' / 'data.txt'}"
+    )
+
+    write_json(artifact_dir / "dialogue" / "tool_command_transcript.json", session.to_dict())
+
+    assert "generate_qrest" in tools_result.response
+    assert load_result.tool_result is not None
+    assert load_result.tool_result["ok"]
+    assert load_result.report.ready
+    assert generate_result.tool_result is not None
+    assert generate_result.tool_result["ok"]
+    assert "警告" in generate_result.response

@@ -28,11 +28,11 @@ class TurnResult:
 
 
 class MetadataAgent:
-    def __init__(self, llm_client: BaseLLMClient | None = None) -> None:
+    def __init__(self, llm_client: BaseLLMClient | None = None, tool_registry: ToolRegistry | None = None) -> None:
         self.state = MetadataState.empty()
         self.sources = SourceManager()
         self.extractor = LLMExtractor(llm_client) if llm_client is not None else RuleBasedExtractor()
-        self.tools = ToolRegistry()
+        self.tools = tool_registry or ToolRegistry()
 
     def ingest_text(self, text: str, source_id: str = "user_message") -> list[SourceChunk]:
         return self.sources.add_text(text, source_id=source_id)

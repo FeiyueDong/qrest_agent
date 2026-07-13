@@ -68,6 +68,10 @@ Useful commands inside the chat:
 - `/state`
 - `/missing`
 - `/conflicts`
+- `/file path/to/source.pdf`
+- `/tools`
+- `/load-qrest input.qrest [source_metadata.json]`
+- `/generate-qrest metadata.json data.txt [output.qrest]`
 - `/confirm Field.Path value`
 - `/quit`
 
@@ -100,6 +104,26 @@ env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli load-qrest \
 ```
 
 Inside Python, use `QrestDataTools.generate_qrest()` and `QrestDataTools.load_qrest()` as deterministic tools.
+
+`generate-qrest` runs a deterministic preflight before calling the bundled binary. It validates metadata and reports data mismatches such as `DataInfo.NPTS` not matching the number of rows in `data.txt`. Warnings are shown in the `ToolResult`; use `--strict` to make warnings block generation.
+
+The dialogue shell can also call these tools:
+
+```bash
+/load-qrest resources/qrest_data/examples/kunming2/kunming2.qrest
+/generate-qrest resources/qrest_data/examples/kunming2/metadata.json resources/qrest_data/examples/kunming2/data.txt
+```
+
+When a dialogue session supplies a `session_id`, tool outputs are managed under that session's artifact directory.
+
+## API Surface
+
+The first API layer is service-first and dependency-light:
+
+- `qrest_agent.api.ApiService` manages sessions, chat turns, text uploads, tool calls, and artifacts.
+- `qrest_agent.api.app.create_app()` provides an optional FastAPI wrapper. Install `qrest-agent[api]` before serving it.
+
+The API service and CLI both call the same deterministic validator, state merger, and `ToolRegistry`.
 
 ## Design Boundary
 

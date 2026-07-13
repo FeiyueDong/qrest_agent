@@ -9,6 +9,7 @@ from typing import Any
 
 from qrest_agent.agent.dialogue import ChatSession
 from qrest_agent.agent.metadata_agent import MetadataAgent
+from qrest_agent.agent.tool_registry import ToolRegistry
 from qrest_agent.core.validator import validate_metadata
 from qrest_agent.ingestion.sources import SourceManager
 from qrest_agent.llm.benchmark import run_llm_benchmark, run_rule_benchmark
@@ -43,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
     chat_parser.add_argument("--model", default=os.environ.get("QREST_AGENT_MODEL", "qwen3:4b-instruct"))
     chat_parser.add_argument("--base-url", default=os.environ.get("QREST_AGENT_BASE_URL", "http://localhost:11434"))
     chat_parser.add_argument("--api-key", default=os.environ.get("QREST_AGENT_API_KEY", ""))
+    chat_parser.add_argument("--session-id", default="default", help="session id used for transcript and tool artifacts")
+    chat_parser.add_argument("--artifact-root", help="directory for session artifacts")
     chat_parser.add_argument(
         "--message",
         action="append",
@@ -76,11 +79,13 @@ def main(argv: list[str] | None = None) -> int:
     resources_parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
 
     generate_parser = subparsers.add_parser("generate-qrest", help="generate a .qrest file from metadata JSON and data TXT")
+    generate_parser.add_argument("--strict", action="store_true", help="treat preflight warnings as blocking errors")
     generate_parser.add_argument("metadata_json")
     generate_parser.add_argument("data_txt")
     generate_parser.add_argument("output_qrest")
 
     load_parser = subparsers.add_parser("load-qrest", help="extract metadata JSON and data TXT from a .qrest file")
+    load_parser.add_argument("--compare-metadata-json", help="optional metadata JSON to compare with loaded metadata")
     load_parser.add_argument("input_qrest")
     load_parser.add_argument("output_metadata_json")
     load_parser.add_argument("output_data_txt")
@@ -103,9 +108,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "resources":
         return _resources(args.json)
     if args.command == "generate-qrest":
-        return _generate_qrest(args.metadata_json, args.data_txt, args.output_qrest)
+        return _generate_qrest(args.metadata_json, args.data_txt, args.output_qrest, args.strict)
     if args.command == "load-qrest":
-        return _load_qrest(args.input_qrest, args.output_metadata_json, args.output_data_txt)
+        return _load_qrest(args.input_qrest, args.output_metadata_json, args.output_data_txt, args.compare_metadata_json)
     return 2
 
 
@@ -124,8 +129,8 @@ def _extract_text(args: argparse.Namespace) -> int:
 
 
 def _chat(args: argparse.Namespace) -> int:
-    agent = MetadataAgent(llm_client=_make_client(args))
-    session = ChatSession(agent)
+    agent = MetadataAgent(llm_client=_make_client(args), tool_registry=ToolRegistry(args.artifact_root))
+    session = ChatSession(agent, session_id=args.session_id)
     if args.message:
         for message in args.message:
             result = session.handle(message)
@@ -212,14 +217,24 @@ def _resources(as_json: bool) -> int:
     return 0
 
 
-def _generate_qrest(metadata_json: str, data_txt: str, output_qrest: str) -> int:
-    result = QrestDataTools().generate_qrest(metadata_json, data_txt, output_qrest)
+def _generate_qrest(metadata_json: str, data_txt: str, output_qrest: str, strict: bool = False) -> int:
+    result = QrestDataTools().generate_qrest(metadata_json, data_txt, output_qrest, strict=strict)
     print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     return 0 if result.ok else 1
 
 
-def _load_qrest(input_qrest: str, output_metadata_json: str, output_data_txt: str) -> int:
-    result = QrestDataTools().load_qrest(input_qrest, output_metadata_json, output_data_txt)
+def _load_qrest(
+    input_qrest: str,
+    output_metadata_json: str,
+    output_data_txt: str,
+    compare_metadata_json: str | None = None,
+) -> int:
+    result = QrestDataTools().load_qrest(
+        input_qrest,
+        output_metadata_json,
+        output_data_txt,
+        compare_metadata_json=compare_metadata_json,
+    )
     print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     return 0 if result.ok else 1
 

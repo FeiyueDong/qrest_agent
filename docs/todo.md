@@ -93,12 +93,12 @@ Acceptance:
 
 ## Phase 5: qREST Tool Skills
 
-- [ ] Add preflight validation before `generate_qrest`.
-- [ ] Report data/metadata mismatches such as `NPTS` versus actual text rows.
-- [ ] Add output artifact management under a project/session directory.
-- [ ] Add a readable summary for `load_qrest` results.
-- [ ] Add optional comparison between generated and source metadata.
-- [ ] Add a tool-dispatch path from dialogue intent to `ToolRegistry.execute`.
+- [x] Add preflight validation before `generate_qrest`.
+- [x] Report data/metadata mismatches such as `NPTS` versus actual text rows.
+- [x] Add output artifact management under a project/session directory.
+- [x] Add a readable summary for `load_qrest` results.
+- [x] Add optional comparison between generated and source metadata.
+- [x] Add a tool-dispatch path from dialogue intent to `ToolRegistry.execute`.
 
 Acceptance:
 
@@ -108,12 +108,12 @@ Acceptance:
 
 ## Phase 6: API Surface
 
-- [ ] Decide whether the first interface is CLI-only, FastAPI, or both.
-- [ ] Add FastAPI app skeleton if web/API development starts.
-- [ ] Add upload endpoints.
-- [ ] Add chat/session endpoints.
-- [ ] Add project artifact endpoints.
-- [ ] Add API tests for validation and extraction flows.
+- [x] Decide whether the first interface is CLI-only, FastAPI, or both.
+- [x] Add FastAPI app skeleton if web/API development starts.
+- [x] Add upload endpoints.
+- [x] Add chat/session endpoints.
+- [x] Add project artifact endpoints.
+- [x] Add API tests for validation and extraction flows.
 
 Acceptance:
 
@@ -135,8 +135,8 @@ Acceptance:
 
 ## Immediate Next Tasks
 
-1. Exercise the CLI dialogue manually with `qwen3:4b-instruct`.
-2. Add file attachment support inside the interactive chat loop.
-3. Add persistent session reload if multi-day dialogue sessions become necessary.
-4. Add preflight checks around qREST data tool calls.
-5. Add tool-dispatch from dialogue intent to qREST data tools.
+1. Start Phase 7 by formalizing the `analysis` schema.
+2. Add method-configuration placeholder tool specs.
+3. Decide whether Phase 7 should stay CLI/API-only or include a small web UI.
+4. Add persistent session reload if multi-day dialogue sessions become necessary.
+5. Exercise `/file`, `/load-qrest`, and `/generate-qrest` manually with `qwen3:4b-instruct`.
