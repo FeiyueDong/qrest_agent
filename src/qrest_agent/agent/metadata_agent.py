@@ -18,12 +18,16 @@ class TurnResult:
     candidates: list[Candidate]
     report: ValidationReport
     response: str
+    extractor: str = "unknown"
+    fallback_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "candidates": [item.to_dict() for item in self.candidates],
             "report": self.report.to_dict(),
             "response": self.response,
+            "extractor": self.extractor,
+            "fallback_reason": self.fallback_reason,
         }
 
 
@@ -47,15 +51,41 @@ class MetadataAgent:
         for path in files or []:
             chunks.extend(self.ingest_file(path))
 
-        try:
-            candidates = self.extractor.extract(chunks)
-        except Exception:
-            candidates = RuleBasedExtractor().extract(chunks)
-        if not candidates and chunks:
-            candidates = RuleBasedExtractor().extract(chunks)
+        using_llm = isinstance(self.extractor, LLMExtractor)
+        fallback_reason: str | None = None
+        rule_extractor = RuleBasedExtractor()
+        if using_llm:
+            try:
+                llm_candidates = self.extractor.extract(chunks)
+            except Exception as exc:
+                fallback_reason = f"LLM extraction failed: {exc}"
+                llm_candidates = []
+
+            rule_candidates = rule_extractor.extract(chunks)
+            if llm_candidates:
+                candidates = llm_candidates + rule_candidates
+                extractor_name = "llm+rule" if rule_candidates else "llm"
+            else:
+                fallback_reason = fallback_reason or "LLM extraction returned no candidates"
+                candidates = rule_candidates
+                extractor_name = "rule"
+        else:
+            try:
+                candidates = rule_extractor.extract(chunks)
+            except Exception as exc:
+                fallback_reason = f"rule extraction failed: {exc}"
+                candidates = []
+            extractor_name = "rule"
+
         self.state.submit_many(candidates)
         report = validate_state(self.state)
-        return TurnResult(candidates=candidates, report=report, response=_build_response(report))
+        return TurnResult(
+            candidates=candidates,
+            report=report,
+            response=_build_response(report),
+            extractor=extractor_name,
+            fallback_reason=fallback_reason,
+        )
 
     def export_metadata(self, include_reserved_analysis: bool = True) -> dict[str, Any]:
         report = validate_state(self.state)

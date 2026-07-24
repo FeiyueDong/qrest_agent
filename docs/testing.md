@@ -48,6 +48,7 @@ Important files include:
 - `test_outputs/dialogue/file_command_result.json`
 - `test_outputs/dialogue/tool_command_transcript.json`
 - `test_outputs/dialogue/phase56_cli_tool_transcript.json`
+- `test_outputs/dialogue/default_provider_smoke.json`
 - `test_outputs/llm/benchmark_case_summary.json`
 - `test_outputs/llm/rule_benchmark.json`
 - `test_outputs/llm/deepseek-r1_1.5b_benchmark.json`

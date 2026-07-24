@@ -41,9 +41,15 @@ class DialogueResult:
 
 
 class ChatSession:
-    def __init__(self, agent: MetadataAgent | None = None, session_id: str = "default") -> None:
+    def __init__(
+        self,
+        agent: MetadataAgent | None = None,
+        session_id: str = "default",
+        runtime_info: dict[str, Any] | None = None,
+    ) -> None:
         self.agent = agent or MetadataAgent()
         self.session_id = session_id
+        self.runtime_info = runtime_info or {"provider": "rule", "model": None, "extractor": "rule"}
         self.turns: list[DialogueTurn] = []
 
     def handle(self, message: str) -> DialogueResult:
@@ -71,6 +77,7 @@ class ChatSession:
         report = validate_state(self.agent.state)
         return {
             "session_id": self.session_id,
+            "runtime": self.runtime_info,
             "report": report.to_dict(),
             "records": self.agent.state.to_audit_dict(),
             "artifacts": self.agent.tools.artifacts.list(self.session_id),
@@ -88,6 +95,8 @@ class ChatSession:
         command = parts[0].lower()
         if command in {"/help", "/?"}:
             return self._command_help()
+        if command in {"/provider", "/debug"}:
+            return self._command_result(_build_runtime_summary(self.runtime_info), command=command)
         if command in {"/state", "/status"}:
             return self._command_result(_build_state_summary(self.agent), command=command)
         if command == "/missing":
@@ -196,7 +205,10 @@ class ChatSession:
             "\n".join(
                 [
                     "可直接输入工程描述，我会提取 qREST 元信息候选值。",
+                    _build_runtime_summary(self.runtime_info),
                     "可用命令：",
+                    "/provider 查看当前模型/provider",
+                    "/debug 查看当前模型/provider",
                     "/state 查看当前已知字段和校验状态",
                     "/missing 查看仍缺少的必要字段",
                     "/conflicts 查看冲突字段",
@@ -218,10 +230,11 @@ class ChatSession:
 def _dialogue_from_agent_turn(turn: TurnResult, agent: MetadataAgent) -> DialogueResult:
     extracted = _format_candidates(turn.candidates)
     next_question = _build_next_question(turn.report, agent)
+    fallback = f"注意：{turn.fallback_reason}，已回退到规则抽取。\n" if turn.fallback_reason else ""
     if extracted:
-        response = f"{extracted}\n{next_question}"
+        response = f"{fallback}{extracted}\n{next_question}"
     else:
-        response = f"我没有从这轮输入中提取到新的 qREST 候选字段。\n{next_question}"
+        response = f"{fallback}我没有从这轮输入中提取到新的 qREST 候选字段。\n{next_question}"
     return DialogueResult(response=response, report=turn.report, candidates=turn.candidates)
 
 
@@ -254,6 +267,15 @@ def _format_tool_result(tool_name: str, result: ToolResult) -> str:
     if not result.ok and result.stderr:
         lines.append(f"stderr: {result.stderr.strip()}")
     return "\n".join(lines)
+
+
+def _build_runtime_summary(runtime_info: dict[str, Any]) -> str:
+    provider = runtime_info.get("provider", "unknown")
+    model = runtime_info.get("model")
+    extractor = runtime_info.get("extractor", "unknown")
+    if model:
+        return f"当前运行模式：provider={provider}; model={model}; extractor={extractor}"
+    return f"当前运行模式：provider={provider}; extractor={extractor}"
 
 
 def _build_next_question(report: ValidationReport, agent: MetadataAgent) -> str:

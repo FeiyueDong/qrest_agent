@@ -48,24 +48,27 @@ Current local-model notes are tracked in [docs/llm_models.md](docs/llm_models.md
 
 ## Command-Line Dialogue
 
-For a deterministic smoke test:
+By default, `chat`, `extract-text`, and `benchmark-extraction` read `resources/llm/provider_config.json`. The current default is `ollama-cli` with `qwen3:4b-instruct`.
+
+For local-model testing with Ollama:
 
 ```bash
 env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli chat
 ```
 
-For local-model testing with Ollama:
+For a deterministic rule-based smoke test:
 
 ```bash
 env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli chat \
-  --provider ollama-cli \
-  --model qwen3:4b-instruct \
+  --provider rule \
   --transcript test_outputs/dialogue/manual_chat_transcript.json
 ```
 
 Useful commands inside the chat:
 
 - `/state`
+- `/provider`
+- `/debug`
 - `/missing`
 - `/conflicts`
 - `/file path/to/source.pdf`
@@ -74,6 +77,10 @@ Useful commands inside the chat:
 - `/generate-qrest metadata.json data.txt [output.qrest]`
 - `/confirm Field.Path value`
 - `/quit`
+
+The chat startup line prints the active provider/model/extractor. If an LLM call fails or returns no valid candidates, the dialogue response reports that it fell back to rule extraction.
+
+The extractor is hybrid during LLM runs: the local/online model extracts flexible natural-language facts, and deterministic rules still run afterward to derive qREST-specific structures such as `BuildingInfo.Elevation` and `InstrumentInfo.Channels`.
 
 ## Bundled qREST Resources
 

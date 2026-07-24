@@ -6,7 +6,7 @@ from pathlib import Path
 from qrest_agent.agent.dialogue import ChatSession
 from qrest_agent.agent.metadata_agent import MetadataAgent
 from qrest_agent.agent.tool_registry import ToolRegistry
-from qrest_agent.cli import main
+from qrest_agent.cli import _load_cli_defaults, main
 from qrest_agent.resources import qrest_examples_root
 from tests.conftest import write_json, write_text
 
@@ -15,6 +15,7 @@ def test_chat_session_extracts_and_reports_missing_fields(artifact_dir: Path) ->
     session = ChatSession()
 
     result = session.handle("项目名称为 DemoBuilding。事件名称为 2025_TEST_EVENT。采样间隔为 0.02s。")
+    provider_result = session.handle("/provider")
     state_result = session.handle("/state")
 
     write_json(artifact_dir / "dialogue" / "basic_session_transcript.json", session.to_dict())
@@ -24,6 +25,7 @@ def test_chat_session_extracts_and_reports_missing_fields(artifact_dir: Path) ->
     assert "BuildingInfo.ProjectName" in session.agent.state.records
     assert "DataInfo.DT" in session.agent.state.records
     assert not result.report.ready
+    assert "provider=rule" in provider_result.response
     assert "当前已知字段" in state_result.response
 
 
@@ -55,6 +57,8 @@ def test_cli_chat_scripted_messages_write_transcript(tmp_path: Path, artifact_di
     exit_code = main(
         [
             "chat",
+            "--provider",
+            "rule",
             "--message",
             "项目名称为 DemoBuilding。采样间隔为 0.02s。",
             "--message",
@@ -77,6 +81,7 @@ def test_cli_chat_scripted_messages_write_transcript(tmp_path: Path, artifact_di
     assert "> /state" in captured.out
     assert payload["turns"]
     assert "DataInfo.NPTS" in payload["records"]
+    assert payload["runtime"]["provider"] == "rule"
 
 
 def test_chat_session_file_command_ingests_document(artifact_dir: Path) -> None:
@@ -109,3 +114,10 @@ def test_chat_session_tool_commands_use_registry(tmp_path: Path, artifact_dir: P
     assert generate_result.tool_result is not None
     assert generate_result.tool_result["ok"]
     assert "警告" in generate_result.response
+
+
+def test_cli_defaults_use_provider_config() -> None:
+    defaults = _load_cli_defaults()
+
+    assert defaults["provider"] == "ollama-cli"
+    assert defaults["model"] == "qwen3:4b-instruct"

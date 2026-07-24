@@ -26,6 +26,7 @@ from qrest_agent.tools.qrest_data_tools import QrestDataTools
 
 
 def main(argv: list[str] | None = None) -> int:
+    defaults = _load_cli_defaults()
     parser = argparse.ArgumentParser(prog="qrest-agent")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -34,15 +35,15 @@ def main(argv: list[str] | None = None) -> int:
 
     extract_parser = subparsers.add_parser("extract-text", help="extract candidates from a text message")
     extract_parser.add_argument("text")
-    extract_parser.add_argument("--provider", choices=["rule", "ollama", "ollama-cli", "openai-compatible"], default="rule")
-    extract_parser.add_argument("--model", default=os.environ.get("QREST_AGENT_MODEL", "qwen3:4b-instruct"))
-    extract_parser.add_argument("--base-url", default=os.environ.get("QREST_AGENT_BASE_URL", "http://localhost:11434"))
+    extract_parser.add_argument("--provider", choices=["rule", "ollama", "ollama-cli", "openai-compatible"], default=defaults["provider"])
+    extract_parser.add_argument("--model", default=defaults["model"])
+    extract_parser.add_argument("--base-url", default=defaults["base_url"])
     extract_parser.add_argument("--api-key", default=os.environ.get("QREST_AGENT_API_KEY", ""))
 
     chat_parser = subparsers.add_parser("chat", help="start a simple command-line metadata dialogue")
-    chat_parser.add_argument("--provider", choices=["rule", "ollama", "ollama-cli", "openai-compatible"], default="rule")
-    chat_parser.add_argument("--model", default=os.environ.get("QREST_AGENT_MODEL", "qwen3:4b-instruct"))
-    chat_parser.add_argument("--base-url", default=os.environ.get("QREST_AGENT_BASE_URL", "http://localhost:11434"))
+    chat_parser.add_argument("--provider", choices=["rule", "ollama", "ollama-cli", "openai-compatible"], default=defaults["provider"])
+    chat_parser.add_argument("--model", default=defaults["model"])
+    chat_parser.add_argument("--base-url", default=defaults["base_url"])
     chat_parser.add_argument("--api-key", default=os.environ.get("QREST_AGENT_API_KEY", ""))
     chat_parser.add_argument("--session-id", default="default", help="session id used for transcript and tool artifacts")
     chat_parser.add_argument("--artifact-root", help="directory for session artifacts")
@@ -55,9 +56,9 @@ def main(argv: list[str] | None = None) -> int:
     chat_parser.add_argument("--transcript", help="optional path to write the dialogue transcript JSON")
 
     benchmark_parser = subparsers.add_parser("benchmark-extraction", help="run extraction benchmark cases")
-    benchmark_parser.add_argument("--provider", choices=["rule", "ollama", "ollama-cli", "openai-compatible"], default="rule")
-    benchmark_parser.add_argument("--model", default=os.environ.get("QREST_AGENT_MODEL", "qwen3:4b-instruct"))
-    benchmark_parser.add_argument("--base-url", default=os.environ.get("QREST_AGENT_BASE_URL", "http://localhost:11434"))
+    benchmark_parser.add_argument("--provider", choices=["rule", "ollama", "ollama-cli", "openai-compatible"], default=defaults["provider"])
+    benchmark_parser.add_argument("--model", default=defaults["model"])
+    benchmark_parser.add_argument("--base-url", default=defaults["base_url"])
     benchmark_parser.add_argument("--api-key", default=os.environ.get("QREST_AGENT_API_KEY", ""))
     benchmark_parser.add_argument("--output", help="optional path to write benchmark JSON")
 
@@ -130,7 +131,9 @@ def _extract_text(args: argparse.Namespace) -> int:
 
 def _chat(args: argparse.Namespace) -> int:
     agent = MetadataAgent(llm_client=_make_client(args), tool_registry=ToolRegistry(args.artifact_root))
-    session = ChatSession(agent, session_id=args.session_id)
+    runtime_info = _runtime_info(args)
+    session = ChatSession(agent, session_id=args.session_id, runtime_info=runtime_info)
+    print(_format_runtime_info(runtime_info))
     if args.message:
         for message in args.message:
             result = session.handle(message)
@@ -259,6 +262,39 @@ def _write_transcript(path: str | None, session: ChatSession) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(session.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_cli_defaults() -> dict[str, str]:
+    fallback = {"provider": "rule", "model": "qwen3:4b-instruct", "base_url": "http://localhost:11434"}
+    try:
+        data = json.loads(llm_provider_config_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+
+    provider = os.environ.get("QREST_AGENT_PROVIDER") or data.get("default_provider") or fallback["provider"]
+    model = os.environ.get("QREST_AGENT_MODEL") or data.get("default_model") or fallback["model"]
+    provider_config = data.get("providers", {}).get(provider, {}) if isinstance(data.get("providers"), dict) else {}
+    base_url = os.environ.get("QREST_AGENT_BASE_URL") or provider_config.get("base_url") or fallback["base_url"]
+    return {"provider": str(provider), "model": str(model), "base_url": str(base_url)}
+
+
+def _runtime_info(args: argparse.Namespace) -> dict[str, str | None]:
+    extractor = "rule" if args.provider == "rule" else "llm"
+    return {
+        "provider": args.provider,
+        "model": None if args.provider == "rule" else args.model,
+        "base_url": getattr(args, "base_url", None),
+        "extractor": extractor,
+    }
+
+
+def _format_runtime_info(runtime_info: dict[str, Any]) -> str:
+    provider = runtime_info.get("provider")
+    model = runtime_info.get("model")
+    extractor = runtime_info.get("extractor")
+    if model:
+        return f"qREST Agent runtime: provider={provider}; model={model}; extractor={extractor}"
+    return f"qREST Agent runtime: provider={provider}; extractor={extractor}"
 
 
 def _make_client(args: argparse.Namespace) -> Any:

@@ -49,6 +49,8 @@ This smoke test extracted `BuildingInfo.ProjectName`, `DataInfo.EventName`, and 
 
 Use the rule-based extractor as the reliability fallback and use `qwen3:4b-instruct` as the first local LLM candidate for continued testing.
 
+The CLI now reads `resources/llm/provider_config.json` for default model settings. With the current configuration, omitting `--provider` in `chat`, `extract-text`, or `benchmark-extraction` uses `ollama-cli` with `qwen3:4b-instruct`. Use `--provider rule` for deterministic offline tests.
+
 Do not use `deepseek-r1:1.5b` or `qwen3.5:2b` as the default strict extractor at this stage. They may still be useful later for explanation or relaxed dialogue, but they are not reliable enough for direct candidate generation.
 
 The state merge path must continue to reject invalid field paths, unsupported non-null values, and model output that fails JSON parsing.

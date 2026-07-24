@@ -78,10 +78,26 @@ def test_agent_extracts_candidates_from_docx_and_pdf(artifact_dir: Path) -> None
         assert "DataInfo.DT" in candidate_paths
         assert "DataInfo.NPTS" in candidate_paths
         assert "InstrumentInfo.ChannelNum" in candidate_paths
+        assert "InstrumentInfo.Channels" in candidate_paths
         assert "BuildingInfo.StructuralFootprint.Parameters" in candidate_paths
         assert "BuildingInfo.StructuralFootprint.BoundingBox" in candidate_paths
+        assert "BuildingInfo.Elevation" in candidate_paths
+
+        by_path = {candidate.field_path: candidate for candidate in result.candidates}
+        elevations = by_path["BuildingInfo.Elevation"].value
+        channels = by_path["InstrumentInfo.Channels"].value
+        channel_heights = sorted({channel["LocationXYZ"][2] for channel in channels})
+
+        assert len(elevations) == 16
+        assert elevations[:5] == [-2.6, 0.0, 4.5, 7.8, 11.1]
+        assert len(channels) == 18
+        assert channel_heights == [-2.6, 0.0, 11.1, 21.0, 30.9, 44.1]
+        assert channels[0]["LocationXYZ"] == [-20.6, -4.2, -2.6]
+        assert channels[0]["DeviceType"] == "941B"
         assert not result.report.ready
         assert "InstrumentInfo.ChannelNum" not in result.report.conflicts
+        assert "InstrumentInfo.Channels" not in result.report.missing_required
+        assert "BuildingInfo.Elevation" not in result.report.missing_required
         assert "BuildingInfo.ProjectName" in result.report.missing_required
 
     write_json(artifact_dir / "ingestion" / "document_agent_extraction_results.json", outputs)

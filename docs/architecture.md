@@ -15,6 +15,14 @@ Flow:
 
 The model is intentionally not allowed to edit final metadata directly.
 
+For local model runs, extraction is hybrid rather than model-only. `LLMExtractor` reads the text first, then `RuleBasedExtractor` still runs as a deterministic companion. This lets the model handle flexible wording while the rule layer performs qREST-specific engineering derivations such as:
+
+- deriving `BuildingInfo.Elevation` from floor counts and story heights;
+- mapping monitored floor labels such as `B1F`, `首层`, `3层`, `6层`, `9层`, `13层` to absolute Z elevations;
+- deriving `InstrumentInfo.Channels` from monitoring floors, per-floor sensor count, footprint dimensions, and left/right/middle sensor layout descriptions.
+
+If the LLM fails or returns no valid candidates, the turn falls back to rule-only extraction and records `fallback_reason`.
+
 ## Stage 2: Algorithm Configuration
 
 The exported object already reserves:
@@ -92,10 +100,15 @@ The shell keeps one in-memory `ChatSession` per process. Each turn can extract c
 
 The shell also exposes deterministic tool commands:
 
+- `/provider` and `/debug` show the active provider, model, and extractor;
 - `/file path` ingests a local file into the metadata workflow;
 - `/tools` lists available deterministic tools;
 - `/load-qrest input.qrest [source_metadata.json]` parses a binary qREST file into session artifacts;
 - `/generate-qrest metadata.json data.txt [output.qrest]` generates a qREST file and surfaces preflight warnings.
+
+CLI defaults are loaded from `resources/llm/provider_config.json`. If no `--provider` is supplied, the current default is `ollama-cli` with `qwen3:4b-instruct`. Tests and deterministic smoke runs should pass `--provider rule` explicitly.
+
+When an LLM extractor fails or produces no valid candidates, `MetadataAgent.run_turn()` falls back to the rule-based extractor and records `fallback_reason` in the turn result. The dialogue response surfaces this fallback so the user can tell whether a model was actually useful for that turn.
 
 This is not yet a full natural-language correction system. For important corrections, the user should use explicit `/confirm` commands so that the deterministic state layer receives a confirmed candidate with clear evidence.
 
