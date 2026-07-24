@@ -82,6 +82,30 @@ The chat startup line prints the active provider/model/extractor. If an LLM call
 
 The extractor is hybrid during LLM runs: the local/online model extracts flexible natural-language facts, and deterministic rules still run afterward to derive qREST-specific structures such as `BuildingInfo.Elevation` and `InstrumentInfo.Channels`.
 
+## Browser UI
+
+The lightweight browser UI uses Python's standard library and does not require FastAPI:
+
+```bash
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli web \
+  --host 127.0.0.1 \
+  --port 8000
+```
+
+Open `http://127.0.0.1:8000/` on the Linux machine.
+
+For LAN testing, bind to all interfaces and visit the Linux machine's LAN IP from another device:
+
+```bash
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli web \
+  --host 0.0.0.0 \
+  --port 8000
+```
+
+Then open `http://<linux-ip>:8000/` from a device on the same network. The local firewall must allow inbound traffic on that port.
+
+The page supports chat turns, document upload, current validation status, extracted field inspection, and artifact preview. It uses the same provider/model defaults as the CLI unless `--provider`, `--model`, or `--base-url` is overridden.
+
 ## Bundled qREST Resources
 
 The project carries a local qREST reference bundle under `resources/qrest_data/`:

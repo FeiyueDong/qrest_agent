@@ -2,25 +2,33 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from qrest_agent.agent.dialogue import ChatSession
 from qrest_agent.agent.metadata_agent import MetadataAgent
 from qrest_agent.agent.tool_registry import ToolRegistry
+from qrest_agent.llm.clients import BaseLLMClient
 from qrest_agent.storage.artifacts import ArtifactManager
 
 
 class ApiService:
-    def __init__(self, artifact_root: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        artifact_root: str | Path | None = None,
+        llm_client_factory: Callable[[], BaseLLMClient | None] | None = None,
+        runtime_info: dict[str, Any] | None = None,
+    ) -> None:
         self.artifacts = ArtifactManager(artifact_root)
         self.sessions: dict[str, ChatSession] = {}
+        self._llm_client_factory = llm_client_factory or (lambda: None)
+        self.runtime_info = runtime_info or {"provider": "rule", "model": None, "extractor": "rule"}
 
     def create_session(self, session_id: str | None = None) -> dict[str, Any]:
         resolved = session_id or f"session-{uuid.uuid4().hex[:12]}"
         if resolved in self.sessions:
             raise ValueError(f"session already exists: {resolved}")
-        agent = MetadataAgent(tool_registry=ToolRegistry(self.artifacts.root))
-        session = ChatSession(agent, session_id=resolved)
+        agent = MetadataAgent(llm_client=self._llm_client_factory(), tool_registry=ToolRegistry(self.artifacts.root))
+        session = ChatSession(agent, session_id=resolved, runtime_info=self.runtime_info)
         self.sessions[resolved] = session
         return session.to_dict()
 
@@ -38,6 +46,15 @@ class ApiService:
         result = session.handle_file(str(path))
         payload = result.to_dict()
         payload["uploaded"] = {"file_name": file_name, "path": str(path)}
+        return payload
+
+    def upload_file_bytes(self, session_id: str, file_name: str, data: bytes) -> dict[str, Any]:
+        session = self._session(session_id)
+        path = self.artifacts.path(session_id, "uploads", file_name)
+        path.write_bytes(data)
+        result = session.handle_file(str(path))
+        payload = result.to_dict()
+        payload["uploaded"] = {"file_name": file_name, "path": str(path), "size": len(data)}
         return payload
 
     def run_tool(self, session_id: str, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -58,7 +75,7 @@ class ApiService:
 
     def read_artifact_text(self, session_id: str, name: str) -> dict[str, Any]:
         self._session(session_id)
-        path = self.artifacts.path(session_id, name)
+        path = self.artifacts.path(session_id, *name.split("/"))
         return {"session_id": session_id, "name": name, "path": str(path), "text": path.read_text(encoding="utf-8")}
 
     def _session(self, session_id: str) -> ChatSession:

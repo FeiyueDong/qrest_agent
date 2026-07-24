@@ -112,6 +112,22 @@ When an LLM extractor fails or produces no valid candidates, `MetadataAgent.run_
 
 This is not yet a full natural-language correction system. For important corrections, the user should use explicit `/confirm` commands so that the deterministic state layer receives a confirmed candidate with clear evidence.
 
+## Browser UI
+
+`qrest_agent.cli web` serves a dependency-light browser UI backed by Python's standard-library `http.server`.
+
+The web UI is intentionally a thin client over `ApiService`:
+
+- `POST /api/sessions` creates an in-memory `ChatSession`;
+- `POST /api/chat` sends natural-language input or dialogue commands;
+- `POST /api/upload` accepts base64-encoded files and forwards them to the same ingestion pipeline used by `/file`;
+- `GET /api/session` refreshes runtime, validation, records, and artifacts;
+- `GET /api/artifact` previews text artifacts.
+
+The server defaults to `127.0.0.1` for local Linux validation. Binding `--host 0.0.0.0` exposes the same UI to other devices on the LAN through `http://<linux-ip>:<port>/`, subject to firewall and network policy.
+
+Like the CLI, the web command loads provider defaults from `resources/llm/provider_config.json`. The page displays the runtime provider/model from the session so local-model usage is visible.
+
 ## API Surface
 
 The project now exposes an `ApiService` in `qrest_agent.api.service`.
@@ -120,7 +136,7 @@ The service provides the stable boundary used by future web clients:
 
 - create and inspect sessions;
 - send chat messages;
-- upload text files into a session;
+- upload text or binary files into a session;
 - execute deterministic tools through the same `ToolRegistry` used by the CLI;
 - list and read session artifacts.
 

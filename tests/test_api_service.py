@@ -15,6 +15,7 @@ def test_api_service_chat_upload_and_artifacts(tmp_path: Path, artifact_dir: Pat
     chat = service.chat("api-session", "项目名称为 DemoApi。采样间隔为 0.02s。")
     upload = service.upload_text("api-session", "event.txt", "事件名称为 API_EVENT。数据点数：30000。")
     artifacts = service.list_artifacts("api-session")
+    preview = service.read_artifact_text("api-session", "uploads/event.txt")
 
     write_json(
         artifact_dir / "api" / "service_chat_upload_artifacts.json",
@@ -23,13 +24,40 @@ def test_api_service_chat_upload_and_artifacts(tmp_path: Path, artifact_dir: Pat
             "chat": chat,
             "upload": upload,
             "artifacts": artifacts,
+            "preview": preview,
         },
     )
 
     assert created["session_id"] == "api-session"
     assert "BuildingInfo.ProjectName" in service.get_session("api-session")["records"]
     assert upload["uploaded"]["path"].endswith("event.txt")
+    assert preview["text"] == "事件名称为 API_EVENT。数据点数：30000。"
     assert any(item["name"] == "uploads/event.txt" for item in artifacts["artifacts"])
+
+
+def test_api_service_binary_docx_upload(tmp_path: Path, artifact_dir: Path) -> None:
+    service = ApiService(artifact_root=tmp_path / "api_artifacts")
+    service.create_session("binary-session")
+    docx = Path("resources/input_doc/Kunming_building_metadata_test_case.docx")
+
+    result = service.upload_file_bytes("binary-session", docx.name, docx.read_bytes())
+    session = service.get_session("binary-session")
+    channels = session["records"]["InstrumentInfo.Channels"]["value"]
+
+    write_json(
+        artifact_dir / "api" / "service_binary_docx_upload.json",
+        {
+            "upload": result,
+            "report": session["report"],
+            "channel_count": len(channels),
+            "channel_heights": sorted({channel["LocationXYZ"][2] for channel in channels}),
+        },
+    )
+
+    assert result["uploaded"]["file_name"] == docx.name
+    assert result["uploaded"]["size"] == docx.stat().st_size
+    assert len(channels) == 18
+    assert session["records"]["BuildingInfo.ElevationNum"]["value"] == 16
 
 
 def test_api_service_runs_qrest_tool(tmp_path: Path, artifact_dir: Path) -> None:

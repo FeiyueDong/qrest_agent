@@ -33,7 +33,10 @@ Important files include:
 - `test_outputs/tools/generated.qrest`
 - `test_outputs/tools/registry_session_artifacts_result.json`
 - `test_outputs/api/service_chat_upload_artifacts.json`
+- `test_outputs/api/service_binary_docx_upload.json`
 - `test_outputs/api/service_tool_result.json`
+- `test_outputs/web/index.html`
+- `test_outputs/web/server_smoke_flow.json`
 - `test_outputs/ingestion/docx_chunks.json`
 - `test_outputs/ingestion/pdf_chunks.json`
 - `test_outputs/ingestion/docx_text.txt`

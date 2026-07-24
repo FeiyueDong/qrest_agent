@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from qrest_agent.api.service import ApiService
 from qrest_agent.agent.dialogue import ChatSession
 from qrest_agent.agent.metadata_agent import MetadataAgent
 from qrest_agent.agent.tool_registry import ToolRegistry
@@ -23,6 +24,7 @@ from qrest_agent.resources import (
     qrest_tool_path,
 )
 from qrest_agent.tools.qrest_data_tools import QrestDataTools
+from qrest_agent.web.server import serve as serve_web
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -54,6 +56,15 @@ def main(argv: list[str] | None = None) -> int:
         help="run one dialogue turn; can be passed multiple times for scripted tests",
     )
     chat_parser.add_argument("--transcript", help="optional path to write the dialogue transcript JSON")
+
+    web_parser = subparsers.add_parser("web", help="serve the dependency-light browser UI")
+    web_parser.add_argument("--host", default="127.0.0.1", help="bind host; use 0.0.0.0 for LAN access")
+    web_parser.add_argument("--port", type=int, default=8000, help="bind port")
+    web_parser.add_argument("--provider", choices=["rule", "ollama", "ollama-cli", "openai-compatible"], default=defaults["provider"])
+    web_parser.add_argument("--model", default=defaults["model"])
+    web_parser.add_argument("--base-url", default=defaults["base_url"])
+    web_parser.add_argument("--api-key", default=os.environ.get("QREST_AGENT_API_KEY", ""))
+    web_parser.add_argument("--artifact-root", help="directory for session artifacts")
 
     benchmark_parser = subparsers.add_parser("benchmark-extraction", help="run extraction benchmark cases")
     benchmark_parser.add_argument("--provider", choices=["rule", "ollama", "ollama-cli", "openai-compatible"], default=defaults["provider"])
@@ -98,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
         return _extract_text(args)
     if args.command == "chat":
         return _chat(args)
+    if args.command == "web":
+        return _web(args)
     if args.command == "benchmark-extraction":
         return _benchmark_extraction(args)
     if args.command == "extract-file":
@@ -153,6 +166,18 @@ def _chat(args: argparse.Namespace) -> int:
         if message.strip().lower() in {"/quit", "/exit"}:
             break
     _write_transcript(args.transcript, session)
+    return 0
+
+
+def _web(args: argparse.Namespace) -> int:
+    runtime_info = _runtime_info(args)
+    service = ApiService(
+        artifact_root=args.artifact_root,
+        llm_client_factory=lambda: _make_client(args),
+        runtime_info=runtime_info,
+    )
+    print(_format_runtime_info(runtime_info))
+    serve_web(host=args.host, port=args.port, service=service)
     return 0
 
 
