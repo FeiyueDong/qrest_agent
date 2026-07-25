@@ -333,7 +333,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     .side {
       display: grid;
-      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      grid-template-rows: auto minmax(0, 1fr) auto;
       gap: 12px;
       overflow: hidden;
     }
@@ -360,6 +360,13 @@ INDEX_HTML = r"""<!doctype html>
       border-radius: 7px;
       padding: 8px;
       background: #fbfcfb;
+      text-align: left;
+      cursor: pointer;
+    }
+    .metric.active {
+      border-color: #7db8ae;
+      background: var(--soft);
+      color: var(--accent-strong);
     }
     .metric span {
       display: block;
@@ -371,11 +378,18 @@ INDEX_HTML = r"""<!doctype html>
       margin-top: 3px;
       font-size: 18px;
     }
+    .metric.active span {
+      color: var(--accent-strong);
+    }
     .upload-row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 8px;
       align-items: center;
+    }
+    .files-artifacts-panel {
+      display: grid;
+      gap: 9px;
     }
     input[type="file"] {
       width: 100%;
@@ -385,41 +399,108 @@ INDEX_HTML = r"""<!doctype html>
       padding: 7px;
       background: #fff;
     }
-    .table-wrap {
+    .records-tree {
+      flex: 1 1 auto;
       min-height: 0;
       overflow: auto;
       border: 1px solid var(--line);
       border-radius: 7px;
+      background: #fbfcfb;
     }
     .records-panel {
       display: flex;
       flex-direction: column;
     }
-    .records-panel .table-wrap {
-      flex: 1 1 auto;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      table-layout: fixed;
-    }
-    th, td {
-      padding: 7px 8px;
+    .tree-node, .tree-leaf {
       border-bottom: 1px solid var(--line);
-      vertical-align: top;
-      text-align: left;
+    }
+    .tree-node:last-child, .tree-leaf:last-child {
+      border-bottom: 0;
+    }
+    .tree-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 7px 8px;
+      cursor: pointer;
+      list-style: none;
       overflow-wrap: anywhere;
     }
-    th {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 600;
-      background: #f7f8f6;
-      position: sticky;
-      top: 0;
+    .tree-summary::-webkit-details-marker {
+      display: none;
     }
-    tr:last-child td {
-      border-bottom: 0;
+    .tree-summary::before {
+      content: ">";
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      transform: rotate(0deg);
+      transition: transform 120ms ease;
+    }
+    details[open] > .tree-summary::before {
+      transform: rotate(90deg);
+    }
+    .tree-name {
+      min-width: 0;
+      flex: 1 1 auto;
+      font-weight: 600;
+    }
+    .tree-count, .status-chip {
+      flex: 0 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 1px 7px;
+      color: var(--muted);
+      background: #fff;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .tree-children {
+      margin-left: 17px;
+      border-left: 1px solid var(--line);
+    }
+    .tree-leaf {
+      padding: 7px 8px 8px 25px;
+      background: #fff;
+    }
+    .leaf-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .leaf-name {
+      min-width: 0;
+      flex: 1 1 auto;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .leaf-value, .value-json {
+      margin-top: 5px;
+      overflow-wrap: anywhere;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    .value-json {
+      max-height: 220px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 8px;
+      background: #f7f8f6;
+      white-space: pre-wrap;
+    }
+    .value-details {
+      margin-top: 5px;
+    }
+    .value-details summary {
+      cursor: pointer;
+      color: var(--accent-strong);
+      overflow-wrap: anywhere;
     }
     .list {
       display: grid;
@@ -512,26 +593,14 @@ INDEX_HTML = r"""<!doctype html>
     <aside class="side">
       <section class="panel">
         <div class="panel-header">
-          <h2>文件</h2>
-          <span class="muted" id="uploadStatus"></span>
-        </div>
-        <div class="upload-row">
-          <input id="fileInput" type="file" accept=".txt,.md,.json,.pdf,.docx,.xlsx,.csv,.qrest">
-          <button id="uploadButton" type="button">导入</button>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-header">
           <h2>校验</h2>
           <button id="refreshButton" type="button">刷新</button>
         </div>
         <div class="meta-grid">
-          <div class="metric"><span>已知</span><strong id="knownCount">0</strong></div>
-          <div class="metric"><span>缺失</span><strong id="missingCount">0</strong></div>
-          <div class="metric"><span>冲突</span><strong id="conflictCount">0</strong></div>
+          <button class="metric active" data-record-filter="known" type="button"><span>已知</span><strong id="knownCount">0</strong></button>
+          <button class="metric" data-record-filter="missing" type="button"><span>缺失</span><strong id="missingCount">0</strong></button>
+          <button class="metric" data-record-filter="conflict" type="button"><span>冲突</span><strong id="conflictCount">0</strong></button>
         </div>
-        <p class="muted" id="missingList"></p>
       </section>
 
       <section class="panel records-panel">
@@ -539,21 +608,19 @@ INDEX_HTML = r"""<!doctype html>
           <h2>字段</h2>
           <span class="muted" id="fieldCount"></span>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th style="width: 43%">路径</th><th style="width: 37%">值</th><th style="width: 20%">状态</th></tr>
-            </thead>
-            <tbody id="recordsBody"></tbody>
-          </table>
-        </div>
+        <div class="records-tree" id="recordsTree"></div>
       </section>
 
-      <section class="panel">
+      <section class="panel files-artifacts-panel">
         <div class="panel-header">
-          <h2>产物</h2>
+          <h2>文件与产物</h2>
           <span class="muted" id="artifactCount"></span>
         </div>
+        <div class="upload-row">
+          <input id="fileInput" type="file" accept=".txt,.md,.json,.pdf,.docx,.xlsx,.csv,.qrest">
+          <button id="uploadButton" type="button">导入</button>
+        </div>
+        <span class="muted" id="uploadStatus"></span>
         <div class="list" id="artifactList"></div>
         <div class="artifact-preview" id="artifactPreview" hidden></div>
       </section>
@@ -563,8 +630,10 @@ INDEX_HTML = r"""<!doctype html>
   <script>
     const state = {
       sessionId: localStorage.getItem("qrest-agent-session-id") || "",
-      session: null
+      session: null,
+      recordFilter: localStorage.getItem("qrest-agent-record-filter") || "known"
     };
+    const recordFilterLabels = {known: "已知", missing: "缺失", conflict: "冲突"};
 
     const messages = document.querySelector("#messages");
     const chatForm = document.querySelector("#chatForm");
@@ -574,6 +643,7 @@ INDEX_HTML = r"""<!doctype html>
     const uploadButton = document.querySelector("#uploadButton");
     const uploadStatus = document.querySelector("#uploadStatus");
     const refreshButton = document.querySelector("#refreshButton");
+    const recordFilterButtons = Array.from(document.querySelectorAll("[data-record-filter]"));
 
     async function api(path, options = {}) {
       const headers = Object.assign({"Content-Type": "application/json"}, options.headers || {});
@@ -663,6 +733,14 @@ INDEX_HTML = r"""<!doctype html>
       refreshSession().catch((error) => appendMessage("assistant", "刷新失败：" + error.message));
     });
 
+    for (const button of recordFilterButtons) {
+      button.addEventListener("click", () => {
+        state.recordFilter = button.dataset.recordFilter || "known";
+        localStorage.setItem("qrest-agent-record-filter", state.recordFilter);
+        renderSession();
+      });
+    }
+
     function appendMessage(role, text, payload) {
       const item = document.createElement("article");
       item.className = "message " + (role === "user" ? "user" : "assistant");
@@ -687,39 +765,191 @@ INDEX_HTML = r"""<!doctype html>
       const report = session.report || {};
       const records = session.records || {};
       const runtime = session.runtime || {};
-      const knownRecords = Object.entries(records).filter(([, record]) => record.value !== null && record.status !== "missing" && record.status !== "empty");
-      const missing = report.missing_required || [];
-      const conflicts = report.conflicts || [];
+      const recordSets = collectRecordSets(records, report);
       document.querySelector("#sessionBadge").textContent = "session: " + (session.session_id || "...");
       document.querySelector("#runtimeBadge").textContent = runtime.model ? "runtime: " + runtime.provider + " / " + runtime.model : "runtime: " + (runtime.provider || "rule");
       const readyBadge = document.querySelector("#readyBadge");
       readyBadge.textContent = "ready: " + (report.ready ? "yes" : "no");
       readyBadge.classList.toggle("ready", !!report.ready);
-      document.querySelector("#knownCount").textContent = String(knownRecords.length);
-      document.querySelector("#missingCount").textContent = String(missing.length);
-      document.querySelector("#conflictCount").textContent = String(conflicts.length);
-      document.querySelector("#missingList").textContent = missing.slice(0, 8).join(", ") + (missing.length > 8 ? " ..." : "");
-      renderRecords(knownRecords);
+      document.querySelector("#knownCount").textContent = String(recordSets.known.length);
+      document.querySelector("#missingCount").textContent = String(recordSets.missing.length);
+      document.querySelector("#conflictCount").textContent = String(recordSets.conflict.length);
+      renderFilterButtons();
+      renderRecords(recordSets[state.recordFilter] || recordSets.known, state.recordFilter);
       renderArtifacts(session.artifacts || []);
     }
 
-    function renderRecords(records) {
-      document.querySelector("#fieldCount").textContent = records.length + " 项";
-      const body = document.querySelector("#recordsBody");
-      body.replaceChildren();
-      for (const [path, record] of records.sort(([a], [b]) => a.localeCompare(b))) {
-        const row = document.createElement("tr");
-        row.append(cell(path), cell(shortJson(record.value)), cell(record.status || ""));
-        body.append(row);
+    function collectRecordSets(records, report) {
+      const conflicts = new Set(report.conflicts || []);
+      const known = Object.entries(records).filter(([, record]) => {
+        return record.value !== null && record.status !== "missing" && record.status !== "empty" && record.status !== "conflict";
+      });
+      const missing = (report.missing_required || []).map((path) => {
+        return [path, records[path] || makeSyntheticRecord(null, "missing")];
+      });
+      const conflict = Array.from(conflicts).map((path) => {
+        return [path, records[path] || makeSyntheticRecord(null, "conflict")];
+      });
+      return {known, missing, conflict};
+    }
+
+    function makeSyntheticRecord(value, status) {
+      return {value, status, confidence: 0, evidence: [], alternatives: []};
+    }
+
+    function renderFilterButtons() {
+      for (const button of recordFilterButtons) {
+        button.classList.toggle("active", button.dataset.recordFilter === state.recordFilter);
       }
+    }
+
+    function renderRecords(records, filterName) {
+      const label = recordFilterLabels[filterName] || "字段";
+      document.querySelector("#fieldCount").textContent = label + " " + records.length + " 项";
+      const tree = document.querySelector("#recordsTree");
+      tree.replaceChildren();
       if (!records.length) {
-        const row = document.createElement("tr");
-        const empty = cell("暂无字段");
-        empty.colSpan = 3;
-        empty.className = "muted";
-        row.append(empty);
-        body.append(row);
+        const empty = document.createElement("div");
+        empty.className = "tree-leaf muted";
+        empty.textContent = "暂无字段";
+        tree.append(empty);
+        return;
       }
+      const root = buildRecordTree(records);
+      for (const [name, node] of sortedChildren(root)) {
+        tree.append(renderTreeNode(name, node, 0));
+      }
+    }
+
+    function buildRecordTree(records) {
+      const root = {children: new Map(), record: null, path: ""};
+      for (const [path, record] of records.sort(([a], [b]) => a.localeCompare(b))) {
+        const parts = path.split(".");
+        let current = root;
+        let currentPath = "";
+        for (const part of parts) {
+          currentPath = currentPath ? currentPath + "." + part : part;
+          if (!current.children.has(part)) {
+            current.children.set(part, {children: new Map(), record: null, path: currentPath});
+          }
+          current = current.children.get(part);
+        }
+        current.record = record;
+      }
+      return root;
+    }
+
+    function renderTreeNode(name, node, depth) {
+      if (!node.children.size) {
+        return renderRecordLeaf(name, node.record);
+      }
+      const details = document.createElement("details");
+      details.className = "tree-node";
+      details.open = depth < 1;
+      const summary = document.createElement("summary");
+      summary.className = "tree-summary";
+      const label = document.createElement("span");
+      label.className = "tree-name";
+      label.textContent = name;
+      const count = document.createElement("span");
+      count.className = "tree-count";
+      count.textContent = countLeaves(node) + " 项";
+      summary.append(label, count);
+      details.append(summary);
+
+      const children = document.createElement("div");
+      children.className = "tree-children";
+      for (const [childName, childNode] of sortedChildren(node)) {
+        children.append(renderTreeNode(childName, childNode, depth + 1));
+      }
+      if (node.record) {
+        children.append(renderRecordLeaf("_value", node.record));
+      }
+      details.append(children);
+      return details;
+    }
+
+    function renderRecordLeaf(name, record) {
+      const item = document.createElement("div");
+      item.className = "tree-leaf";
+      const head = document.createElement("div");
+      head.className = "leaf-head";
+      const label = document.createElement("span");
+      label.className = "leaf-name";
+      label.textContent = name;
+      const status = document.createElement("span");
+      status.className = "status-chip";
+      status.textContent = record && record.status ? record.status : "";
+      head.append(label, status);
+      item.append(head);
+
+      if (!record) {
+        return item;
+      }
+      if (record.status === "missing") {
+        const value = document.createElement("div");
+        value.className = "leaf-value muted";
+        value.textContent = "未提供";
+        item.append(value);
+      } else if (record.status === "conflict") {
+        const details = document.createElement("details");
+        details.className = "value-details";
+        details.open = true;
+        const summary = document.createElement("summary");
+        const alternatives = record.alternatives || [];
+        summary.textContent = "当前值与 " + alternatives.length + " 个候选值冲突";
+        const pre = document.createElement("pre");
+        pre.className = "value-json";
+        pre.textContent = JSON.stringify(
+          {
+            current: record.value,
+            alternatives: alternatives.map((item) => item.value)
+          },
+          null,
+          2
+        );
+        details.append(summary, pre);
+        item.append(details);
+      } else if (isStructuredValue(record.value)) {
+        const details = document.createElement("details");
+        details.className = "value-details";
+        const summary = document.createElement("summary");
+        summary.textContent = valueSummary(record.value);
+        const pre = document.createElement("pre");
+        pre.className = "value-json";
+        pre.textContent = JSON.stringify(record.value, null, 2);
+        details.append(summary, pre);
+        item.append(details);
+      } else {
+        const value = document.createElement("div");
+        value.className = "leaf-value";
+        value.textContent = JSON.stringify(record.value);
+        item.append(value);
+      }
+      return item;
+    }
+
+    function sortedChildren(node) {
+      return Array.from(node.children.entries()).sort(([a], [b]) => a.localeCompare(b));
+    }
+
+    function countLeaves(node) {
+      let count = node.record ? 1 : 0;
+      for (const child of node.children.values()) {
+        count += countLeaves(child);
+      }
+      return count;
+    }
+
+    function isStructuredValue(value) {
+      return value !== null && typeof value === "object";
+    }
+
+    function valueSummary(value) {
+      if (Array.isArray(value)) {
+        return "Array(" + value.length + ")";
+      }
+      return "Object(" + Object.keys(value || {}).length + ")";
     }
 
     function renderArtifacts(items) {
@@ -757,17 +987,6 @@ INDEX_HTML = r"""<!doctype html>
         pre.textContent = "无法预览：" + error.message;
         preview.append(pre);
       }
-    }
-
-    function cell(text) {
-      const td = document.createElement("td");
-      td.textContent = text;
-      return td;
-    }
-
-    function shortJson(value) {
-      const text = JSON.stringify(value);
-      return text.length > 240 ? text.slice(0, 237) + "..." : text;
     }
 
     function fileToBase64(file) {

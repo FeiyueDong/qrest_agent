@@ -33,6 +33,7 @@ class TurnResult:
 
 class MetadataAgent:
     def __init__(self, llm_client: BaseLLMClient | None = None, tool_registry: ToolRegistry | None = None) -> None:
+        self.llm_client = llm_client
         self.state = MetadataState.empty()
         self.sources = SourceManager()
         self.extractor = LLMExtractor(llm_client) if llm_client is not None else RuleBasedExtractor()

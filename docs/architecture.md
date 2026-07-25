@@ -110,7 +110,13 @@ CLI defaults are loaded from `resources/llm/provider_config.json`. If no `--prov
 
 When an LLM extractor fails or produces no valid candidates, `MetadataAgent.run_turn()` falls back to the rule-based extractor and records `fallback_reason` in the turn result. The dialogue response surfaces this fallback so the user can tell whether a model was actually useful for that turn.
 
-This is not yet a full natural-language correction system. For important corrections, the user should use explicit `/confirm` commands so that the deterministic state layer receives a confirmed candidate with clear evidence.
+Natural-language correction now uses a structured action interpreter. When a message looks like a state-changing instruction, `ActionInterpreter` asks the configured model to return an action such as:
+
+- `resolve_conflicts` with `choice=current|alternative`;
+- `confirm_field` with validated qREST field paths and values;
+- `none` when the message should continue through normal extraction.
+
+The model only parses intent. Python still validates field paths, checks conflicts, coerces value types, creates `confirmed` candidates, and merges them through `MetadataState`. If no model is configured or the model output is unusable, a small deterministic fallback handles simple bulk conflict phrases.
 
 ## Browser UI
 

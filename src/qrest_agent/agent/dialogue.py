@@ -5,6 +5,7 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Any
 
+from qrest_agent.agent.actions import ActionIntent, ActionInterpreter, FieldUpdate, should_interpret_action
 from qrest_agent.agent.metadata_agent import MetadataAgent, TurnResult
 from qrest_agent.core.models import Candidate, Evidence, ValidationReport
 from qrest_agent.core.schema import QREST_FIELD_SPECS_BY_PATH
@@ -50,6 +51,7 @@ class ChatSession:
         self.agent = agent or MetadataAgent()
         self.session_id = session_id
         self.runtime_info = runtime_info or {"provider": "rule", "model": None, "extractor": "rule"}
+        self.action_interpreter = ActionInterpreter(getattr(self.agent, "llm_client", None))
         self.turns: list[DialogueTurn] = []
 
     def handle(self, message: str) -> DialogueResult:
@@ -60,8 +62,10 @@ class ChatSession:
         elif text.startswith("/"):
             result = self._handle_command(text)
         else:
-            turn_result = self.agent.run_turn(text=text)
-            result = _dialogue_from_agent_turn(turn_result, self.agent)
+            result = self._handle_natural_language_action(text)
+            if result is None:
+                turn_result = self.agent.run_turn(text=text)
+                result = _dialogue_from_agent_turn(turn_result, self.agent)
 
         self.turns.append(DialogueTurn(role="assistant", text=result.response, payload=result.to_dict()))
         return result
@@ -138,6 +142,89 @@ class ChatSession:
         report = validate_state(self.agent.state)
         response = f"已确认 {field_path} = {json.dumps(value, ensure_ascii=False)}。\n{_build_next_question(report, self.agent)}"
         return DialogueResult(response=response, report=report, candidates=[candidate], command=command)
+
+    def _handle_natural_language_action(self, text: str) -> DialogueResult | None:
+        if not should_interpret_action(text, self.agent.state):
+            return None
+        intent = self.action_interpreter.interpret(text, self.agent.state)
+        if intent.action == "none":
+            return None
+        if intent.action == "resolve_conflicts":
+            return self._resolve_conflicts_from_intent(text, intent)
+        if intent.action == "confirm_field":
+            return self._confirm_fields_from_intent(text, intent)
+        return None
+
+    def _resolve_conflicts_from_intent(self, text: str, intent: ActionIntent) -> DialogueResult:
+        report = validate_state(self.agent.state)
+        if not report.conflicts:
+            return self._command_result("当前没有冲突字段需要处理。", command="resolve_conflicts")
+
+        field_paths = report.conflicts if intent.scope == "all" else [path for path in intent.field_paths if path in report.conflicts]
+        candidates: list[Candidate] = []
+        skipped: list[str] = []
+        for field_path in field_paths:
+            record = self.agent.state.records.get(field_path)
+            if record is None:
+                skipped.append(field_path)
+                continue
+            if intent.choice == "alternative":
+                if not record.alternatives:
+                    skipped.append(field_path)
+                    continue
+                chosen = record.alternatives[-1]
+                value = chosen.value
+                evidence = list(chosen.evidence)
+            else:
+                value = record.value
+                evidence = list(record.evidence)
+
+            candidate = Candidate(
+                field_path=field_path,
+                value=value,
+                status="confirmed",
+                confidence=1.0,
+                evidence=[
+                    *evidence,
+                    Evidence(source_id="user_confirmation", location="chat", text=text),
+                ],
+            )
+            self.agent.state.submit(candidate)
+            candidates.append(candidate)
+
+        report = validate_state(self.agent.state)
+        choice_text = "候选值" if intent.choice == "alternative" else "当前值"
+        lines = [f"已根据你的描述将 {len(candidates)} 个冲突字段确认采用{choice_text}。"]
+        if intent.source:
+            lines.append(f"动作解释来源：{intent.source}。")
+        if skipped:
+            lines.append("以下字段未能自动处理：" + "，".join(skipped))
+        if candidates:
+            lines.append(_format_candidates(candidates))
+        lines.append(_build_next_question(report, self.agent))
+        return DialogueResult(response="\n".join(line for line in lines if line), report=report, candidates=candidates, command="resolve_conflicts")
+
+    def _confirm_fields_from_intent(self, text: str, intent: ActionIntent) -> DialogueResult:
+        candidates: list[Candidate] = []
+        skipped: list[str] = []
+        for update in intent.updates:
+            candidate = _candidate_from_field_update(update, text)
+            if candidate is None:
+                skipped.append(update.field_path)
+                continue
+            self.agent.state.submit(candidate)
+            candidates.append(candidate)
+
+        report = validate_state(self.agent.state)
+        lines = [f"已根据你的描述确认 {len(candidates)} 个字段。"]
+        if intent.source:
+            lines.append(f"动作解释来源：{intent.source}。")
+        if skipped:
+            lines.append("以下字段未能自动处理：" + "，".join(skipped))
+        if candidates:
+            lines.append(_format_candidates(candidates))
+        lines.append(_build_next_question(report, self.agent))
+        return DialogueResult(response="\n".join(line for line in lines if line), report=report, candidates=candidates, command="confirm_fields")
 
     def _file(self, parts: list[str], command: str) -> DialogueResult:
         if len(parts) != 2:
@@ -337,22 +424,38 @@ def _build_state_summary(agent: MetadataAgent) -> str:
     return "\n".join(lines)
 
 
-def _parse_confirmed_value(field_path: str, raw_value: str) -> Any:
+def _candidate_from_field_update(update: FieldUpdate, text: str) -> Candidate | None:
+    if update.field_path not in QREST_FIELD_SPECS_BY_PATH:
+        return None
+    value = _coerce_confirmed_value(update.field_path, update.value)
+    return Candidate(
+        field_path=update.field_path,
+        value=value,
+        status="confirmed",
+        confidence=1.0,
+        evidence=[Evidence(source_id="user_confirmation", location="chat", text=text)],
+    )
+
+
+def _coerce_confirmed_value(field_path: str, value: Any) -> Any:
     spec = QREST_FIELD_SPECS_BY_PATH[field_path]
+    if spec.kind == "integer" and not isinstance(value, int):
+        try:
+            return int(str(value).strip())
+        except ValueError:
+            return value
+    if spec.kind == "number" and not isinstance(value, int | float):
+        try:
+            return float(str(value).strip())
+        except ValueError:
+            return value
+    return value
+
+
+def _parse_confirmed_value(field_path: str, raw_value: str) -> Any:
     stripped = raw_value.strip()
     try:
         parsed = json.loads(stripped)
     except json.JSONDecodeError:
         parsed = stripped
-
-    if spec.kind == "integer" and not isinstance(parsed, int):
-        try:
-            return int(stripped)
-        except ValueError:
-            return parsed
-    if spec.kind == "number" and not isinstance(parsed, int | float):
-        try:
-            return float(stripped)
-        except ValueError:
-            return parsed
-    return parsed
+    return _coerce_confirmed_value(field_path, parsed)

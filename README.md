@@ -78,6 +78,12 @@ Useful commands inside the chat:
 - `/confirm Field.Path value`
 - `/quit`
 
+For user instructions that should modify state, the dialogue layer asks the configured model to parse a structured action, then Python validates and executes it. Examples:
+
+- `冲突部分全部更新为候选值`
+- `所有冲突保留当前值`
+- `采样点数按 30000 处理`
+
 The chat startup line prints the active provider/model/extractor. If an LLM call fails or returns no valid candidates, the dialogue response reports that it fell back to rule extraction.
 
 The extractor is hybrid during LLM runs: the local/online model extracts flexible natural-language facts, and deterministic rules still run afterward to derive qREST-specific structures such as `BuildingInfo.Elevation` and `InstrumentInfo.Channels`.

@@ -56,6 +56,12 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
     )
 
     assert "qREST Agent" in index_html
+    assert 'id="recordsTree"' in index_html
+    assert 'data-record-filter="known"' in index_html
+    assert 'data-record-filter="missing"' in index_html
+    assert 'data-record-filter="conflict"' in index_html
+    assert 'id="missingList"' not in index_html
+    assert "function buildRecordTree" in index_html
     assert created["session_id"] == "web-session"
     assert "BuildingInfo.ProjectName" in session["records"]
     assert upload["uploaded"]["file_name"] == "web_note.txt"

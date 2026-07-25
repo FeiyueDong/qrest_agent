@@ -45,6 +45,9 @@ Important files include:
 - `test_outputs/dialogue/basic_session_transcript.json`
 - `test_outputs/dialogue/basic_state.txt`
 - `test_outputs/dialogue/confirm_command_result.json`
+- `test_outputs/dialogue/natural_language_conflict_resolution.json`
+- `test_outputs/dialogue/llm_action_conflict_resolution.json`
+- `test_outputs/dialogue/llm_action_field_confirmation.json`
 - `test_outputs/dialogue/cli_chat_transcript.json`
 - `test_outputs/dialogue/cli_chat_output.txt`
 - `test_outputs/dialogue/qwen3_chat_transcript.json`
