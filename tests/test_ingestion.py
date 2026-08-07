@@ -94,11 +94,11 @@ def test_agent_extracts_candidates_from_docx_and_pdf(artifact_dir: Path) -> None
         assert channel_heights == [-2.6, 0.0, 11.1, 21.0, 30.9, 44.1]
         assert channels[0]["LocationXYZ"] == [-20.6, -4.2, -2.6]
         assert channels[0]["DeviceType"] == "941B"
-        assert not result.report.ready
+        assert result.report.ready
         assert "InstrumentInfo.ChannelNum" not in result.report.conflicts
         assert "InstrumentInfo.Channels" not in result.report.missing_required
         assert "BuildingInfo.Elevation" not in result.report.missing_required
-        assert "BuildingInfo.ProjectName" in result.report.missing_required
+        assert "BuildingInfo.ProjectName" in result.report.missing_optional
 
     write_json(artifact_dir / "ingestion" / "document_agent_extraction_results.json", outputs)
 

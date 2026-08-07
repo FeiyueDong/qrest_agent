@@ -4,6 +4,7 @@ from pathlib import Path
 
 from qrest_agent.api.app import create_app
 from qrest_agent.api.service import ApiService
+from qrest_agent.core.models import Candidate
 from qrest_agent.resources import qrest_examples_root
 from tests.conftest import write_json
 
@@ -80,6 +81,58 @@ def test_api_service_runs_qrest_tool(tmp_path: Path, artifact_dir: Path) -> None
     assert result["state_update"]["report"]["ready"]
     assert any(item["name"] == "loaded_metadata.json" for item in artifacts["artifacts"])
     assert any(item["name"] == "loaded_data.txt" for item in artifacts["artifacts"])
+
+
+def test_api_service_exports_weighted_metadata(tmp_path: Path, artifact_dir: Path) -> None:
+    service = ApiService(artifact_root=tmp_path / "api_artifacts")
+    service.create_session("export-session")
+    session = service._session("export-session")
+    for candidate in [
+        Candidate(field_path="BuildingInfo.ElevationNum", value=1, status="confirmed"),
+        Candidate(field_path="BuildingInfo.Elevation", value=[0.0], status="confirmed"),
+        Candidate(field_path="InstrumentInfo.ChannelNum", value=1, status="confirmed"),
+        Candidate(
+            field_path="InstrumentInfo.Channels",
+            value=[{"ChannelNo": 1, "Azimuth": 90.0, "LocationXYZ": [0.0, 0.0, 0.0]}],
+            status="confirmed",
+        ),
+        Candidate(field_path="DataInfo.NPTS", value=30000, status="confirmed"),
+        Candidate(field_path="DataInfo.DT", value=0.02, status="confirmed"),
+    ]:
+        session.agent.state.submit(candidate)
+
+    result = service.export_metadata("export-session")
+    metadata_text = service.read_artifact_text("export-session", "metadata.json")["text"]
+    artifacts = service.list_artifacts("export-session")
+
+    write_json(
+        artifact_dir / "api" / "service_weighted_export_result.json",
+        {"result": result, "metadata": metadata_text, "artifacts": artifacts},
+    )
+
+    assert result["ok"]
+    assert result["defaulted_fields"]
+    assert result["blank_fields"]
+    assert any(item["name"] == "metadata.json" for item in artifacts["artifacts"])
+    assert any(item["name"] == "metadata_export_report.json" for item in artifacts["artifacts"])
+
+
+def test_api_service_blocks_export_when_mandatory_missing(tmp_path: Path, artifact_dir: Path) -> None:
+    service = ApiService(artifact_root=tmp_path / "api_artifacts")
+    service.create_session("blocked-export")
+
+    result = service.export_metadata("blocked-export")
+    artifacts = service.list_artifacts("blocked-export")
+
+    write_json(
+        artifact_dir / "api" / "service_blocked_export_result.json",
+        {"result": result, "artifacts": artifacts},
+    )
+
+    assert not result["ok"]
+    assert "BuildingInfo.Elevation" in result["blocked_fields"]
+    assert any(item["name"] == "metadata_export_report.json" for item in artifacts["artifacts"])
+    assert not any(item["name"] == "metadata.json" for item in artifacts["artifacts"])
 
 
 def test_fastapi_app_is_optional() -> None:

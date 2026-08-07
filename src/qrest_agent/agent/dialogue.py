@@ -370,6 +370,10 @@ def _build_next_question(report: ValidationReport, agent: MetadataAgent) -> str:
         return _build_conflict_question(agent)
     if report.missing_required:
         return _build_missing_question(report)
+    if report.missing_important:
+        return _build_important_warning(report)
+    if report.missing_optional:
+        return _build_optional_note(report)
     if any(issue.level == "warning" for issue in report.issues):
         return "元数据已基本完整，但仍有警告需要复核。输入 /state 查看详情。"
     return "元数据已通过校验，可以进入导出或后续算法配置。"
@@ -387,6 +391,22 @@ def _build_missing_question(report: ValidationReport, limit: int = 6) -> str:
     if remaining > 0:
         lines.append(f"... 还有 {remaining} 个字段未显示。输入 /missing 查看。")
     return "\n".join(lines)
+
+
+def _build_important_warning(report: ValidationReport, limit: int = 6) -> str:
+    lines = ["必须字段已满足，但仍缺少重要字段；导出时会使用默认值："]
+    for path in report.missing_important[:limit]:
+        spec = QREST_FIELD_SPECS_BY_PATH.get(path)
+        description = f"：{spec.description}" if spec else ""
+        lines.append(f"- {path}{description}")
+    remaining = len(report.missing_important) - limit
+    if remaining > 0:
+        lines.append(f"... 还有 {remaining} 个重要字段未显示。")
+    return "\n".join(lines)
+
+
+def _build_optional_note(report: ValidationReport) -> str:
+    return f"必须字段已满足，仍有 {len(report.missing_optional)} 个非关键字段缺失；导出时会留空。"
 
 
 def _build_conflict_question(agent: MetadataAgent) -> str:
@@ -411,7 +431,8 @@ def _build_state_summary(agent: MetadataAgent) -> str:
         for path, record in sorted(agent.state.records.items())
         if record.value is not None and record.status not in {"missing", "empty"}
     ]
-    lines = [f"ready={report.ready}; known={len(known)}; missing={len(report.missing_required)}; conflicts={len(report.conflicts)}"]
+    missing_count = len(report.missing_required) + len(report.missing_important) + len(report.missing_optional)
+    lines = [f"ready={report.ready}; known={len(known)}; missing={missing_count}; conflicts={len(report.conflicts)}"]
     if known:
         lines.append("当前已知字段：")
         for path, record in known:
@@ -419,6 +440,10 @@ def _build_state_summary(agent: MetadataAgent) -> str:
             lines.append(f"- {path} = {value} ({record.status})")
     if report.missing_required:
         lines.append(_build_missing_question(report, limit=5))
+    if report.missing_important:
+        lines.append(_build_important_warning(report, limit=5))
+    if report.missing_optional:
+        lines.append(_build_optional_note(report))
     if report.conflicts:
         lines.append(_build_conflict_question(agent))
     return "\n".join(lines)

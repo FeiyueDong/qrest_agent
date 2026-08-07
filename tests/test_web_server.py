@@ -4,7 +4,6 @@ import base64
 from email.message import Message
 from io import BytesIO
 import json
-import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -35,12 +34,14 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
             "content_base64": base64.b64encode("事件名称为 WEB_EVENT。数据点数：30000。".encode("utf-8")).decode("ascii"),
         },
     )
+    export = _request_json(
+        handler,
+        "/api/export-metadata",
+        method="POST",
+        payload={"session_id": "web-session", "file_name": "metadata.json"},
+    )
     session = _request_json(handler, "/api/session?session_id=web-session")
     artifacts = _request_json(handler, "/api/artifacts?session_id=web-session")
-    preview = _request_json(
-        handler,
-        "/api/artifact?session_id=web-session&name=" + urllib.parse.quote("uploads/web_note.txt", safe=""),
-    )
 
     write_text(artifact_dir / "web" / "index.html", index_html)
     write_json(
@@ -49,9 +50,9 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
             "created": created,
             "chat": chat,
             "upload": upload,
+            "export": export,
             "session": session,
             "artifacts": artifacts,
-            "preview": preview,
         },
     )
 
@@ -61,11 +62,21 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
     assert 'data-record-filter="missing"' in index_html
     assert 'data-record-filter="conflict"' in index_html
     assert 'id="missingList"' not in index_html
+    assert 'id="fileInput"' in index_html
+    assert 'id="uploadButton"' in index_html
+    assert 'id="exportButton"' in index_html
+    assert "文件与产物" not in index_html
+    assert "files-artifacts-panel" not in index_html
+    assert "artifactList" not in index_html
+    assert "artifactPreview" not in index_html
+    assert "uploadStatus" not in index_html
+    assert "function renderArtifacts" not in index_html
     assert "function buildRecordTree" in index_html
     assert created["session_id"] == "web-session"
     assert "BuildingInfo.ProjectName" in session["records"]
     assert upload["uploaded"]["file_name"] == "web_note.txt"
-    assert preview["text"] == "事件名称为 WEB_EVENT。数据点数：30000。"
+    assert not export["ok"]
+    assert any(item["name"] == "metadata_export_report.json" for item in artifacts["artifacts"])
     assert any(item["name"] == "uploads/web_note.txt" for item in artifacts["artifacts"])
 
 

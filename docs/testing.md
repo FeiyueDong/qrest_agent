@@ -19,6 +19,10 @@ Important files include:
 - `test_outputs/validation/kunming2_ready_report.json`
 - `test_outputs/validation/missing_dt_report.json`
 - `test_outputs/validation/channel_mismatch_report.json`
+- `test_outputs/validation/metadata_policy_summary.json`
+- `test_outputs/validation/weighted_missing_report.json`
+- `test_outputs/validation/weighted_export_result.json`
+- `test_outputs/validation/weighted_export_blocked.json`
 - `test_outputs/agent/ready_metadata.json`
 - `test_outputs/agent/ready_audit.json`
 - `test_outputs/agent/not_ready_audit.json`
@@ -35,6 +39,8 @@ Important files include:
 - `test_outputs/api/service_chat_upload_artifacts.json`
 - `test_outputs/api/service_binary_docx_upload.json`
 - `test_outputs/api/service_tool_result.json`
+- `test_outputs/api/service_weighted_export_result.json`
+- `test_outputs/api/service_blocked_export_result.json`
 - `test_outputs/web/index.html`
 - `test_outputs/web/server_smoke_flow.json`
 - `test_outputs/ingestion/docx_chunks.json`

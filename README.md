@@ -112,6 +112,12 @@ Then open `http://<linux-ip>:8000/` from a device on the same network. The local
 
 The page supports chat turns, document upload, current validation status, extracted field inspection, and artifact preview. It uses the same provider/model defaults as the CLI unless `--provider`, `--model`, or `--base-url` is overridden.
 
+The page can also export `metadata.json` into the current session artifacts. Export follows the weighted metadata policy marked in `resources/qrest_data/examples/metadata.json`:
+
+- `必须`: blocks export when missing;
+- `重要`: exports with a warning and fills the annotated default value;
+- `不重要`: exports with an info note and leaves the value blank.
+
 ## Bundled qREST Resources
 
 The project carries a local qREST reference bundle under `resources/qrest_data/`:

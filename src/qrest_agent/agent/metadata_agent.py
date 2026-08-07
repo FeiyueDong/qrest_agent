@@ -6,6 +6,7 @@ from typing import Any
 
 from qrest_agent.agent.extractor import LLMExtractor, RuleBasedExtractor
 from qrest_agent.agent.tool_registry import ToolRegistry
+from qrest_agent.core.exporter import MetadataExportResult, prepare_metadata_export
 from qrest_agent.core.models import Candidate, ValidationReport
 from qrest_agent.core.state import MetadataState
 from qrest_agent.core.validator import validate_state
@@ -89,27 +90,32 @@ class MetadataAgent:
         )
 
     def export_metadata(self, include_reserved_analysis: bool = True) -> dict[str, Any]:
-        report = validate_state(self.state)
-        if not report.ready:
-            missing = ", ".join(report.missing_required)
-            conflicts = ", ".join(report.conflicts)
-            raise ValueError(f"metadata is not ready; missing=[{missing}], conflicts=[{conflicts}]")
-        return self.state.to_metadata(include_reserved_analysis=include_reserved_analysis)
+        result = self.prepare_metadata_export(include_reserved_analysis=include_reserved_analysis)
+        if not result.ok or result.metadata is None:
+            blocked = ", ".join(result.blocked_fields)
+            raise ValueError(f"metadata cannot be exported; blocked=[{blocked}]")
+        return result.metadata
+
+    def prepare_metadata_export(self, include_reserved_analysis: bool = True) -> MetadataExportResult:
+        return prepare_metadata_export(self.state, include_reserved_analysis=include_reserved_analysis)
 
     def export_audit(self) -> dict[str, Any]:
         report = validate_state(self.state)
+        export = self.prepare_metadata_export()
         return {
             "ready": report.ready,
             "validation": report.to_dict(),
+            "export": export.to_dict(include_metadata=False),
             "records": self.state.to_audit_dict(),
             "tool_specs": [spec.to_dict() for spec in self.tools.list_specs()],
         }
 
     def export_artifacts(self, metadata_path: str | Path, audit_path: str | Path) -> ValidationReport:
-        report = validate_state(self.state)
+        export = self.prepare_metadata_export()
+        report = export.report
         Path(audit_path).write_text(_to_json(self.export_audit()), encoding="utf-8")
-        if report.ready:
-            Path(metadata_path).write_text(_to_json(self.export_metadata()), encoding="utf-8")
+        if export.ok and export.metadata is not None:
+            Path(metadata_path).write_text(_to_json(export.metadata), encoding="utf-8")
         return report
 
 
@@ -118,6 +124,10 @@ def _build_response(report: ValidationReport) -> str:
         return "发现字段存在冲突，请确认：" + "，".join(report.conflicts)
     if report.missing_required:
         return "当前仍缺少必要信息：" + "，".join(report.missing_required)
+    if report.missing_important:
+        return "必须字段已满足，但仍缺少重要信息，导出时会使用默认值：" + "，".join(report.missing_important)
+    if report.missing_optional:
+        return "必须字段已满足，部分非关键字段缺失，导出时会留空。"
     if any(issue.level == "warning" for issue in report.issues):
         return "元数据已基本完整，但仍有警告需要复核。"
     return "元数据已通过校验，可以导出 qREST metadata.json。"

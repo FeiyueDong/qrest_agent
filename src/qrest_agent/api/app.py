@@ -49,6 +49,13 @@ def create_app(service: ApiService | None = None) -> Any:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @app.post("/sessions/{session_id}/exports/metadata")
+    def export_metadata(session_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        try:
+            return api.export_metadata(session_id, str((payload or {}).get("file_name", "metadata.json")))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.get("/sessions/{session_id}/artifacts")
     def list_artifacts(session_id: str) -> dict[str, Any]:
         try:

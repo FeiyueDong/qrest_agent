@@ -69,6 +69,17 @@ class ApiService:
             payload["state_update"] = update.to_dict()
         return payload
 
+    def export_metadata(self, session_id: str, file_name: str = "metadata.json") -> dict[str, Any]:
+        session = self._session(session_id)
+        result = session.agent.prepare_metadata_export()
+        report_path = self.artifacts.write_json(session_id, "metadata_export_report.json", result.to_dict(include_metadata=False))
+        payload = result.to_dict(include_metadata=False)
+        payload["artifacts"] = {"report": str(report_path)}
+        if result.ok and result.metadata is not None:
+            metadata_path = self.artifacts.write_json(session_id, file_name, result.metadata)
+            payload["artifacts"]["metadata"] = str(metadata_path)
+        return payload
+
     def list_artifacts(self, session_id: str) -> dict[str, Any]:
         self._session(session_id)
         return {"session_id": session_id, "artifacts": self.artifacts.list(session_id)}

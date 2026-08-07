@@ -24,6 +24,10 @@ def qrest_examples_root() -> Path:
     return qrest_data_root() / "examples"
 
 
+def qrest_metadata_policy_path() -> Path:
+    return qrest_examples_root() / "metadata.json"
+
+
 def qrest_docs_root() -> Path:
     return qrest_data_root() / "docs"
 

@@ -134,6 +134,18 @@ The server defaults to `127.0.0.1` for local Linux validation. Binding `--host 0
 
 Like the CLI, the web command loads provider defaults from `resources/llm/provider_config.json`. The page displays the runtime provider/model from the session so local-model usage is visible.
 
+## Weighted Metadata Export
+
+The metadata export policy is loaded from `resources/qrest_data/examples/metadata.json`, where fields are annotated with `必须`, `重要`, or `不重要` comments.
+
+The deterministic export layer applies the policy as follows:
+
+- missing `必须` fields and unresolved conflicts block `metadata.json`;
+- missing `重要` fields produce warnings and are filled from the annotated default template;
+- missing `不重要` fields produce info notes and are written as blank values.
+
+`MetadataAgent.prepare_metadata_export()` owns this behavior. The browser calls `POST /api/export-metadata`, which writes `metadata.json` and `metadata_export_report.json` into the session artifacts when export is allowed. If export is blocked, only the report artifact is written.
+
 ## API Surface
 
 The project now exposes an `ApiService` in `qrest_agent.api.service`.
@@ -143,6 +155,7 @@ The service provides the stable boundary used by future web clients:
 - create and inspect sessions;
 - send chat messages;
 - upload text or binary files into a session;
+- export weighted `metadata.json` artifacts;
 - execute deterministic tools through the same `ToolRegistry` used by the CLI;
 - list and read session artifacts.
 

@@ -90,7 +90,7 @@ class FieldRecord:
 
 @dataclass(slots=True)
 class ValidationIssue:
-    level: Literal["error", "warning"]
+    level: Literal["error", "warning", "info"]
     field_path: str
     message: str
 
@@ -102,6 +102,8 @@ class ValidationIssue:
 class ValidationReport:
     ready: bool
     missing_required: list[str] = field(default_factory=list)
+    missing_important: list[str] = field(default_factory=list)
+    missing_optional: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
     issues: list[ValidationIssue] = field(default_factory=list)
 
@@ -109,7 +111,9 @@ class ValidationReport:
         return {
             "ready": self.ready,
             "missing_required": self.missing_required,
+            "missing_important": self.missing_important,
+            "missing_optional": self.missing_optional,
+            "missing_fields": self.missing_required + self.missing_important + self.missing_optional,
             "conflicts": self.conflicts,
             "issues": [item.to_dict() for item in self.issues],
         }
-

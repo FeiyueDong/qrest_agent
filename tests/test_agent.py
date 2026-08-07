@@ -58,7 +58,8 @@ def test_rule_based_turn_reports_missing_fields(artifact_dir: Path) -> None:
 
     assert "BuildingInfo.ProjectName" in [item.field_path for item in result.candidates]
     assert not result.report.ready
-    assert "BuildingInfo.StructuralType" in result.report.missing_required
+    assert "BuildingInfo.Elevation" in result.report.missing_required
+    assert "BuildingInfo.StructuralType" in result.report.missing_optional
 
 
 def test_bad_llm_falls_back_to_rule_based_extractor(artifact_dir: Path) -> None:

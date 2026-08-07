@@ -43,6 +43,7 @@ QREST_FIELD_SPECS = [
 
 QREST_REQUIRED_PATHS = [spec.path for spec in QREST_FIELD_SPECS if spec.requirement == "required"]
 QREST_FIELD_SPECS_BY_PATH = {spec.path: spec for spec in QREST_FIELD_SPECS}
+QREST_TRACKED_PATHS = [spec.path for spec in QREST_FIELD_SPECS]
 QREST_EXTENSION_POLICY = (
     "Unknown fields are preserved during import/export. They are not required for readiness "
     "and are not used by deterministic validation unless promoted to FieldSpec."

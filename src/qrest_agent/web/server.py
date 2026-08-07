@@ -120,6 +120,14 @@ def _make_handler(state: WebServerState) -> type[BaseHTTPRequestHandler]:
                 except Exception as exc:  # The response should expose ingestion failures to the UI.
                     self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
                 return
+            if route.path == "/api/export-metadata":
+                try:
+                    session_id = str(payload["session_id"])
+                    file_name = str(payload.get("file_name", "metadata.json"))
+                    self._send_json(state.service.export_metadata(session_id, file_name))
+                except KeyError as exc:
+                    self._send_error(HTTPStatus.NOT_FOUND, str(exc))
+                return
             self._send_error(HTTPStatus.NOT_FOUND, f"unknown route: {route.path}")
 
         def log_message(self, format: str, *args: Any) -> None:
@@ -307,7 +315,7 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--muted);
       font-size: 12px;
     }
-    .message pre, .artifact-preview pre {
+    .message pre {
       margin: 0;
       overflow: auto;
       white-space: pre-wrap;
@@ -318,8 +326,42 @@ INDEX_HTML = r"""<!doctype html>
     .composer {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "input send"
+        "tools tools";
       gap: 10px;
       padding: 10px;
+    }
+    .composer textarea {
+      grid-area: input;
+    }
+    .composer #sendButton {
+      grid-area: send;
+      align-self: start;
+      min-width: 76px;
+    }
+    .composer-tools {
+      grid-area: tools;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+    }
+    .file-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .export-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 0 0 auto;
     }
     textarea {
       min-height: 76px;
@@ -333,7 +375,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     .side {
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto;
+      grid-template-rows: auto minmax(0, 1fr);
       gap: 12px;
       overflow: hidden;
     }
@@ -380,16 +422,6 @@ INDEX_HTML = r"""<!doctype html>
     }
     .metric.active span {
       color: var(--accent-strong);
-    }
-    .upload-row {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 8px;
-      align-items: center;
-    }
-    .files-artifacts-panel {
-      display: grid;
-      gap: 9px;
     }
     input[type="file"] {
       width: 100%;
@@ -502,18 +534,6 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--accent-strong);
       overflow-wrap: anywhere;
     }
-    .list {
-      display: grid;
-      gap: 7px;
-      max-height: 170px;
-      overflow: auto;
-    }
-    .list button {
-      width: 100%;
-      height: auto;
-      text-align: left;
-      background: #fbfcfb;
-    }
     .muted {
       color: var(--muted);
     }
@@ -522,14 +542,6 @@ INDEX_HTML = r"""<!doctype html>
     }
     .bad {
       color: var(--bad);
-    }
-    .artifact-preview {
-      max-height: 220px;
-      overflow: auto;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: 8px;
-      background: #fbfcfb;
     }
     @media (max-width: 980px) {
       body {
@@ -553,13 +565,21 @@ INDEX_HTML = r"""<!doctype html>
       .app {
         padding: 8px;
       }
-      .topbar, .composer, .upload-row {
+      .topbar, .composer, .composer-tools, .file-actions, .export-actions {
         grid-template-columns: 1fr;
         flex-direction: column;
         align-items: stretch;
       }
       .composer {
         display: grid;
+        grid-template-columns: 1fr;
+        grid-template-areas:
+          "input"
+          "tools"
+          "send";
+      }
+      .composer #sendButton {
+        justify-self: stretch;
       }
       .badges {
         justify-content: flex-start;
@@ -587,6 +607,15 @@ INDEX_HTML = r"""<!doctype html>
       <form class="composer" id="chatForm">
         <textarea id="messageInput" placeholder="输入工程描述或命令，例如 /state"></textarea>
         <button class="primary" id="sendButton" type="submit">发送</button>
+        <div class="composer-tools">
+          <div class="file-actions">
+            <input id="fileInput" type="file" accept=".txt,.md,.json,.pdf,.docx,.xlsx,.csv,.qrest">
+            <button id="uploadButton" type="button">导入文件</button>
+          </div>
+          <div class="export-actions">
+            <button id="exportButton" type="button">导出 metadata.json</button>
+          </div>
+        </div>
       </form>
     </section>
 
@@ -610,20 +639,6 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <div class="records-tree" id="recordsTree"></div>
       </section>
-
-      <section class="panel files-artifacts-panel">
-        <div class="panel-header">
-          <h2>文件与产物</h2>
-          <span class="muted" id="artifactCount"></span>
-        </div>
-        <div class="upload-row">
-          <input id="fileInput" type="file" accept=".txt,.md,.json,.pdf,.docx,.xlsx,.csv,.qrest">
-          <button id="uploadButton" type="button">导入</button>
-        </div>
-        <span class="muted" id="uploadStatus"></span>
-        <div class="list" id="artifactList"></div>
-        <div class="artifact-preview" id="artifactPreview" hidden></div>
-      </section>
     </aside>
   </main>
 
@@ -641,7 +656,7 @@ INDEX_HTML = r"""<!doctype html>
     const sendButton = document.querySelector("#sendButton");
     const fileInput = document.querySelector("#fileInput");
     const uploadButton = document.querySelector("#uploadButton");
-    const uploadStatus = document.querySelector("#uploadStatus");
+    const exportButton = document.querySelector("#exportButton");
     const refreshButton = document.querySelector("#refreshButton");
     const recordFilterButtons = Array.from(document.querySelectorAll("[data-record-filter]"));
 
@@ -705,7 +720,6 @@ INDEX_HTML = r"""<!doctype html>
       const file = fileInput.files && fileInput.files[0];
       if (!file) return;
       uploadButton.disabled = true;
-      uploadStatus.textContent = file.name;
       try {
         const contentBase64 = await fileToBase64(file);
         const result = await api("/api/upload", {
@@ -719,13 +733,32 @@ INDEX_HTML = r"""<!doctype html>
         appendMessage("user", "/file " + file.name);
         appendMessage("assistant", result.response, result);
         fileInput.value = "";
-        uploadStatus.textContent = "完成";
         await refreshSession();
       } catch (error) {
-        uploadStatus.textContent = "失败";
         appendMessage("assistant", "文件导入失败：" + error.message);
       } finally {
         uploadButton.disabled = false;
+      }
+    });
+
+    exportButton.addEventListener("click", async () => {
+      exportButton.disabled = true;
+      try {
+        const result = await api("/api/export-metadata", {
+          method: "POST",
+          body: JSON.stringify({session_id: state.sessionId, file_name: "metadata.json"})
+        });
+        const lines = result.messages || [];
+        if (result.ok) {
+          appendMessage("assistant", ["metadata.json 已导出。"].concat(lines).join("\n"), result);
+        } else {
+          appendMessage("assistant", ["metadata.json 未导出。"].concat(lines).join("\n"), result);
+        }
+        await refreshSession();
+      } catch (error) {
+        appendMessage("assistant", "导出失败：" + error.message);
+      } finally {
+        exportButton.disabled = false;
       }
     });
 
@@ -776,7 +809,6 @@ INDEX_HTML = r"""<!doctype html>
       document.querySelector("#conflictCount").textContent = String(recordSets.conflict.length);
       renderFilterButtons();
       renderRecords(recordSets[state.recordFilter] || recordSets.known, state.recordFilter);
-      renderArtifacts(session.artifacts || []);
     }
 
     function collectRecordSets(records, report) {
@@ -784,7 +816,11 @@ INDEX_HTML = r"""<!doctype html>
       const known = Object.entries(records).filter(([, record]) => {
         return record.value !== null && record.status !== "missing" && record.status !== "empty" && record.status !== "conflict";
       });
-      const missing = (report.missing_required || []).map((path) => {
+      const missingPaths = []
+        .concat(report.missing_required || [])
+        .concat(report.missing_important || [])
+        .concat(report.missing_optional || []);
+      const missing = missingPaths.map((path) => {
         return [path, records[path] || makeSyntheticRecord(null, "missing")];
       });
       const conflict = Array.from(conflicts).map((path) => {
@@ -950,43 +986,6 @@ INDEX_HTML = r"""<!doctype html>
         return "Array(" + value.length + ")";
       }
       return "Object(" + Object.keys(value || {}).length + ")";
-    }
-
-    function renderArtifacts(items) {
-      document.querySelector("#artifactCount").textContent = items.length + " 个";
-      const list = document.querySelector("#artifactList");
-      list.replaceChildren();
-      for (const item of items) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = item.name + " (" + item.size + " B)";
-        button.addEventListener("click", () => previewArtifact(item.name));
-        list.append(button);
-      }
-      if (!items.length) {
-        const note = document.createElement("span");
-        note.className = "muted";
-        note.textContent = "暂无产物";
-        list.append(note);
-      }
-    }
-
-    async function previewArtifact(name) {
-      const preview = document.querySelector("#artifactPreview");
-      try {
-        const data = await api("/api/artifact?session_id=" + encodeURIComponent(state.sessionId) + "&name=" + encodeURIComponent(name));
-        preview.hidden = false;
-        preview.innerHTML = "";
-        const pre = document.createElement("pre");
-        pre.textContent = data.text;
-        preview.append(pre);
-      } catch (error) {
-        preview.hidden = false;
-        preview.innerHTML = "";
-        const pre = document.createElement("pre");
-        pre.textContent = "无法预览：" + error.message;
-        preview.append(pre);
-      }
     }
 
     function fileToBase64(file) {
