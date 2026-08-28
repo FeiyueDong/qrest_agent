@@ -364,11 +364,22 @@ def _dialogue_from_agent_turn(turn: TurnResult, agent: MetadataAgent) -> Dialogu
     extracted = _format_candidates(turn.candidates)
     next_question = _build_next_question(turn.report, agent)
     fallback = f"注意：{turn.fallback_reason}，已回退到规则抽取。\n" if turn.fallback_reason else ""
-    if extracted:
-        response = f"{fallback}{extracted}\n{next_question}"
-    else:
-        response = f"{fallback}我没有从这轮输入中提取到新的 qREST 候选字段。\n{next_question}"
-    return DialogueResult(response=response, report=turn.report, candidates=turn.candidates)
+    tool_lines = _format_tool_results(turn.tool_results)
+    guidance = (
+        _format_guidance(turn.decision.guidance)
+        if turn.decision.action in {"ask_missing", "review_warnings", "resolve_conflicts"}
+        else ""
+    )
+    parts = []
+    if fallback:
+        parts.append(fallback.rstrip())
+    parts.append(extracted if extracted else "我没有从这轮输入中提取到新的 qREST 候选字段。")
+    if tool_lines:
+        parts.append(tool_lines)
+    if guidance:
+        parts.append(guidance)
+    parts.append(next_question)
+    return DialogueResult(response="\n".join(parts), report=turn.report, candidates=turn.candidates)
 
 
 def _format_candidates(candidates: list[Candidate]) -> str:
@@ -380,6 +391,27 @@ def _format_candidates(candidates: list[Candidate]) -> str:
         value = json.dumps(candidate.value, ensure_ascii=False)
         lines.append(f"- {candidate.field_path} = {value} ({candidate.status}, confidence={candidate.confidence:.2f})")
     return "\n".join(lines)
+
+
+def _format_tool_results(tool_results: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for item in tool_results or []:
+        tool = item.get("tool")
+        if tool == "calculate_frequency":
+            lines.append(f"工具计算：Frequency = 1 / DT = {item.get('value')} Hz")
+        elif tool == "derive_counts":
+            source = ", ".join(item.get("derived_from") or [])
+            lines.append(f"工具推导：{item.get('field_path')} = {item.get('value')}（derived_from {source}）")
+        elif item.get("ok") and tool == "read_document":
+            output = item.get("output") or {}
+            lines.append(f"工具读取：{output.get('path')}（{output.get('chunk_count', 0)} 个文本块）")
+    return "\n".join(lines)
+
+
+def _format_guidance(guidance: list[str]) -> str:
+    if not guidance:
+        return ""
+    return "\n".join(f"参考 Skill {entry}" for entry in guidance)
 
 
 def _format_tool_result(tool_name: str, result: ToolResult) -> str:

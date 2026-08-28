@@ -16,6 +16,15 @@ class SourceChunk:
     text: str
     source_type: str = "text"
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SourceChunk":
+        return cls(
+            source_id=str(data.get("source_id", "unknown")),
+            location=str(data.get("location", "")),
+            text=str(data.get("text", "")),
+            source_type=str(data.get("source_type", "text")),
+        )
+
     def to_dict(self) -> dict[str, str]:
         return {
             "source_id": self.source_id,

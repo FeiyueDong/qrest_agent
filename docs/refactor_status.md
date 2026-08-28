@@ -31,7 +31,14 @@
     `normalize_azimuth` / `derive_elevation_profile` / `derive_channel_layout` /
     `derive_counts` / `validate_metadata`；
   - 待建：`table_reader`（通道表读取）、单位归一化工具与 metadata writer。
-- [ ] **Phase 6：Agent Loop**（读 Skill / 调 Tool / 提问的自主循环）
+- [x] **Phase 6：Agent Loop（核心循环）**
+  - `QrestAgent.run_turn` 落地自主循环：理解 → LLM 规划（`plan`，规则兜底）
+    → 执行 Tool（`execute_plan`，如 read_document 读取后直接进入提取）
+    → 候选入 Working State → 自动确定性推导（derive_counts / calculate_frequency，
+    derived + tool 证据落库）→ Validator → 读取相关专业知识 Skill 形成决策指导
+    → 应答（含工具计算结果与 Skill 参考）；
+  - 对话层同步展示工具结果与 Skill 指导；
+  - 待办：`ChatSession` 的任务路由（TaskCoordinator）随 facade 移除时并入主 Agent。
 - [ ] **Phase 7：验证机制**（evidence validation / conflict validation 全面接入导出策略）
 
 ## 过渡说明

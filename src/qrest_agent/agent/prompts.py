@@ -78,6 +78,35 @@ AGENT_SYSTEM_PROMPT = """你是 qREST 专业 AI Agent（主 Agent），面向建
 """.strip()
 
 
+PLANNING_SCHEMA_HINT: dict[str, str] = {
+    "action": "extract | tool | ask | export | none",
+    "tool": "registered tool name or null",
+    "arguments": "tool arguments object or {}",
+    "skills": ["skill names to consult"],
+    "reason": "short explanation",
+}
+
+
+AGENT_PLANNING_PROMPT = """你是 qREST 主 Agent 的规划步骤。给定用户消息、当前 Working State 摘要、
+可用 Skill 列表与可用 Tool 列表，返回一个 JSON 计划对象：
+
+{
+  "action": "extract | tool | ask | export | none",
+  "tool": null 或已注册工具名,
+  "arguments": {} 或工具参数,
+  "skills": ["需要参考的 skill 名"],
+  "reason": "简短理由"
+}
+
+规则：
+1. 普通工程信息、上传资料 → action="extract"（系统会做证据化提取并入 Working State）。
+2. 只有调用已注册 Tool 且有明确参数时才用 action="tool"；参数必须来自用户消息或当前状态，禁止编造。
+3. 需要用户补充信息时 action="ask"；状态已就绪需要导出时才 action="export"。
+4. 不要自己判断工程值是否可信；确定性 Validator 负责 readiness。
+5. 只输出 JSON，不要输出任何其他文本。
+""".strip()
+
+
 def build_extraction_user_prompt(text: str) -> str:
     return (
         "Extract qREST metadata candidates from this source text. "
