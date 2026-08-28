@@ -58,6 +58,7 @@ def test_a_skill_instructions_injected_into_extraction(artifact_dir: Path) -> No
 
     write_json(artifact_dir / "round3" / "test_a_skill_into_extraction.json", {"requests": client.requests})
     extraction_content = client.requests[2][1]["content"]
+    system_content = client.requests[2][0]["content"]
     assert "Intent:" in extraction_content
     assert "Relevant skills:" in extraction_content
     assert "- building_info" in extraction_content
@@ -66,6 +67,10 @@ def test_a_skill_instructions_injected_into_extraction(artifact_dir: Path) -> No
     assert "BuildingInfo" in extraction_content
     assert "Source:" in extraction_content
     assert "结构为RC框架" in extraction_content
+    # Schema Hardening：LLM 必须看到字段类型与结构（方案 §9-§10/§76）
+    assert "Field schema" in system_content
+    assert "ChannelNum" in system_content
+    assert "never write Channels=18" in system_content
 
 
 def test_b_correction_intent_reaches_extraction_and_confirms(artifact_dir: Path) -> None:

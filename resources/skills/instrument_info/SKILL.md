@@ -41,3 +41,13 @@ description: 监测设备、通道和传感器信息
 - 文档说 18 个通道但列出的通道数不是 18 → 冲突；
 - 通道编号不连续或重复 → 标出并请用户确认；
 - 同一测点两种坐标 → 请用户选择并保留证据。
+
+
+## 结构严格区分（Schema 硬约束，方案 §44）
+
+- ChannelNum 是 integer（通道总数）；Channels 是 array<object>（完整通道配置数组）。
+- “系统共布置18个传感器 / 共有18个通道”只能支持：ChannelNum = 18。
+  Channels = 18 是结构非法值，必须拒绝，绝不写入 Working State。
+- Channels 必须是完整 channel object 数组（每项含 ChannelNo/ChannelID/Measurand/Scale/Azimuth/LocationXYZ）；
+  如果资料只有总数量而没有逐通道配置，则：ChannelNum 可以确认；Channels 保持 missing。
+- 禁止用 ChannelNum=18 反向生成 18 个空 Channels；也禁止把数量写进 Channels。

@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from qrest_agent.core.path import get_path, set_path
-from qrest_agent.core.schema import DEFAULT_METADATA
+from qrest_agent.core.schema import DEFAULT_METADATA, QREST_FIELD_SPECS_BY_PATH
+from qrest_agent.core.schema_gate import SchemaViolation, validate_shape
 from qrest_agent.state.evidence import Evidence
 
 FieldStatus = Literal[
@@ -169,7 +170,12 @@ class WorkingState:
         derived_from: list[str] | None = None,
         updated_by: str = "system",
     ) -> FieldState:
-        """低层写入/覆盖（导入、种子数据用）。对话合并请使用 update/confirm/derive。"""
+        """低层写入/覆盖（导入、种子数据用）。对话合并请使用 update/confirm/derive。
+
+        方案 §21/§23：tracked metadata 字段写入前执行 Schema 形状门；
+        confirmed/derived 都不能绕过（§24/§25）。非法结构 raise SchemaViolation。
+        """
+        _guard_schema_shape(field_path, value)
         state = self.record(field_path)
         if (
             state.value is not None
@@ -389,6 +395,7 @@ class WorkingState:
         derived_from: list[str] | None,
         updated_by: str | None,
     ) -> FieldState:
+        _guard_schema_shape(field_path, value)
         status = _normalize_status(status)
         if status == "missing" or value is None:
             state = self.record(field_path)
@@ -457,3 +464,17 @@ def _normalize_status(status: Any) -> FieldStatus:
     if status in _ALLOWED_STATUSES:
         return status  # type: ignore[return-value]
     return "extracted"
+
+
+def _guard_schema_shape(field_path: str, value: Any) -> None:
+    """形状门（方案 §21-§25）：只有结构上合法的值可以进入 Working State。"""
+    if value is None or field_path not in QREST_FIELD_SPECS_BY_PATH:
+        return
+    result = validate_shape(field_path, value)
+    if not result.valid:
+        raise SchemaViolation(
+            field_path,
+            result.expected,
+            result.actual,
+            "; ".join(result.errors) or f"expected {result.expected}, got {result.actual}",
+        )

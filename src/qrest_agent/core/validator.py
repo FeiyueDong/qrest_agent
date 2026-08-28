@@ -6,7 +6,9 @@ from qrest_agent.core.models import ValidationIssue, ValidationReport
 from qrest_agent.core.metadata_policy import channel_key_importance, channel_policy_keys, field_policy, is_blank
 from qrest_agent.core.path import get_path
 from qrest_agent.core.schema import QREST_REQUIRED_PATHS
+from qrest_agent.core.schema_gate import SchemaViolation, validate_shape
 from qrest_agent.state import WorkingState
+from qrest_agent.state.evidence import Evidence
 from qrest_agent.state.working_state import EXPORTABLE_STATUSES
 
 
@@ -17,6 +19,8 @@ def validate_state(state: Any) -> ValidationReport:
     missing_optional: list[str] = []
     conflicts: list[str] = []
     issues: list[ValidationIssue] = []
+
+    _validate_schema(metadata, issues)
 
     for path in QREST_REQUIRED_PATHS:
         record = state.records.get(path)
@@ -77,7 +81,69 @@ def _validate_evidence(state: Any, issues: list[ValidationIssue]) -> list[str]:
 
 
 def validate_metadata(metadata: dict[str, Any]) -> ValidationReport:
-    return validate_state(WorkingState.from_metadata(metadata, paths=QREST_REQUIRED_PATHS))
+    """对完整 metadata dict 校验（方案 §32/§60）：非法结构不得因来源是 JSON 而放行。
+
+    结构非法字段跳过导入（避免 SchemaViolation 中断），改由 Generic Schema
+    Validation 层以 schema_error 报告。
+    """
+    state = WorkingState()
+    for path in QREST_REQUIRED_PATHS:
+        value = get_path(metadata, path)
+        if value is None:
+            continue
+        try:
+            state.set(
+                path,
+                value,
+                status="confirmed",
+                confidence=1.0,
+                evidence=[Evidence(source_id="metadata", location=path)],
+                updated_by="import",
+            )
+        except SchemaViolation:
+            continue
+
+    report = validate_state(state)
+    issues = list(report.issues)
+    _validate_schema(metadata, issues)
+    issues = _dedupe_issues(issues)
+    return ValidationReport(
+        ready=report.ready and not any(issue.level == "error" for issue in issues),
+        missing_required=report.missing_required,
+        missing_important=report.missing_important,
+        missing_optional=report.missing_optional,
+        conflicts=report.conflicts,
+        evidence_gaps=report.evidence_gaps,
+        issues=issues,
+    )
+
+
+def _validate_schema(metadata: dict[str, Any], issues: list[ValidationIssue]) -> None:
+    """Generic Schema Validation（方案 §28/§66）：所有字段基于统一 Schema 校验类型与形状。
+
+    嵌套 required keys 的完整结构由 Domain Validation 按字段政策报告
+    （方案 §54：基本 item type → Schema 层；完整 mandatory nested field → Validator）。
+    """
+    for path in QREST_REQUIRED_PATHS:
+        value = get_path(metadata, path)
+        if is_blank(value):
+            continue
+        result = validate_shape(path, value)
+        if not result.valid:
+            for error in result.errors:
+                issues.append(ValidationIssue("error", path, error))
+
+
+def _dedupe_issues(issues: list[ValidationIssue]) -> list[ValidationIssue]:
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[ValidationIssue] = []
+    for issue in issues:
+        key = (issue.level, issue.field_path, issue.message)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(issue)
+    return unique
 
 
 def _validate_root(metadata: dict[str, Any], issues: list[ValidationIssue]) -> None:
@@ -154,6 +220,9 @@ def _validate_instrument(
     channels = instrument.get("Channels")
     channel_num = instrument.get("ChannelNum")
     if not isinstance(channels, list):
+        # 方案 §26：类型不对必须报错，不能静默跳过
+        if not is_blank(channels):
+            issues.append(ValidationIssue("error", "InstrumentInfo.Channels", "Channels must be an array"))
         return
 
     if isinstance(channel_num, int) and len(channels) != channel_num:

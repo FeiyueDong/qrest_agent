@@ -43,3 +43,11 @@ description: 建筑位置、结构类型、尺寸、标高等工程信息
 - 文档标高数与层数不一致 → 标出双方证据，请用户确认；
 - 不同资料的结构类型写法不同（如 SteelFrame vs 钢框架）→ 确认后再规范化；
 - 楼层高度与总高度矛盾 → 冲突，请用户提供权威来源。
+
+
+## 结构严格区分（Schema 硬约束，方案 §45）
+
+- ElevationNum 是 integer（标高层数）；Elevation 是 array<number>（绝对标高数组）。
+- “建筑有16个标高层”只能支持：ElevationNum = 16。
+  Elevation = 16 是结构非法值，必须拒绝，绝不写入 Working State。
+- 只有明确层高或标高数据时才能生成 Elevation = [...]；只有层数而没有层高时 Elevation 保持 missing。

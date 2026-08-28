@@ -8,6 +8,7 @@ from typing import Any
 from qrest_agent.agent.agent import QrestAgent, TurnResult
 from qrest_agent.core.models import Candidate, Evidence, ValidationReport
 from qrest_agent.core.schema import QREST_FIELD_SPECS_BY_PATH
+from qrest_agent.core.schema_gate import SchemaViolation
 from qrest_agent.core.validator import validate_state
 from qrest_agent.tools.qrest_data_tools import ToolResult
 
@@ -33,6 +34,7 @@ class DialogueResult:
     extractor: str | None = None
     fallback_reason: str | None = None
     turn: dict[str, Any] | None = None
+    rejected_candidates: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -45,6 +47,7 @@ class DialogueResult:
             "extractor": self.extractor,
             "fallback_reason": self.fallback_reason,
             "turn": self.turn,
+            "rejected_candidates": list(self.rejected_candidates),
         }
 
 
@@ -111,6 +114,7 @@ class ChatSession:
                 extractor=turn_result.extractor,
                 fallback_reason=turn_result.fallback_reason,
                 turn=_turn_summary(turn_result),
+                rejected_candidates=turn_result.rejected_candidates,
             )
             self.last_turn = result.turn
 
@@ -128,6 +132,7 @@ class ChatSession:
             extractor=turn_result.extractor,
             fallback_reason=turn_result.fallback_reason,
             turn=_turn_summary(turn_result),
+            rejected_candidates=turn_result.rejected_candidates,
         )
         self.last_turn = result.turn
         self.turns.append(DialogueTurn(role="assistant", text=result.response, payload=result.to_dict()))
@@ -203,7 +208,14 @@ class ChatSession:
         raw_value = " ".join(parts[2:])
         value = _parse_confirmed_value(field_path, raw_value)
         evidence = [Evidence(source_id="user_confirmation", location="chat", text=raw_value)]
-        self.agent.working_state.confirm(field_path, value, evidence, updated_by="user")
+        try:
+            self.agent.working_state.confirm(field_path, value, evidence, updated_by="user")
+        except SchemaViolation as exc:
+            # 方案 §24/§62：confirmed 也不能绕过 Schema
+            return self._command_result(
+                f"结构校验拒绝：{field_path} 期望 {exc.expected}，实际为 {exc.actual}。{exc.reason}",
+                command=command,
+            )
         report = validate_state(self.agent.working_state)
         response = f"已确认 {field_path} = {json.dumps(value, ensure_ascii=False)}。\n{_build_next_question(report, self.agent)}"
         return DialogueResult(response=response, report=report, command=command)

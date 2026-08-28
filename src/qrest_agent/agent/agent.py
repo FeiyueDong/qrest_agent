@@ -12,6 +12,7 @@ from qrest_agent.agent.tool_registry import ToolRegistry
 from qrest_agent.core.exporter import MetadataExportResult, prepare_metadata_export as _prepare_metadata_export
 from qrest_agent.core.models import Candidate, ValidationReport
 from qrest_agent.core.schema import QREST_TRACKED_PATHS
+from qrest_agent.core.schema_gate import SchemaViolation, validate_shape
 from qrest_agent.core.validator import validate_state
 from qrest_agent.ingestion.sources import SourceChunk, SourceManager
 from qrest_agent.llm.clients import BaseLLMClient
@@ -45,6 +46,8 @@ class TurnResult:
     fallback_reason: str | None = None
     tool_results: list[dict[str, Any]] = field(default_factory=list)
     action_results: dict[str, Any] = field(default_factory=dict)
+    #: 方案 §48：被 Schema Gate 拒绝的候选（结构非法，不得进入 Working State）
+    rejected_candidates: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,6 +60,7 @@ class TurnResult:
             "fallback_reason": self.fallback_reason,
             "tool_results": list(self.tool_results),
             "action_results": dict(self.action_results),
+            "rejected_candidates": list(self.rejected_candidates),
         }
 
 
@@ -259,7 +263,7 @@ class QrestAgent:
         plan = self.planner.plan(text or "", context, self.llm_client)
 
         # 6. execute actions
-        candidates, action_results, extractor_name, fallback_reason = self._execute_actions(plan, chunks, text or "")
+        candidates, action_results, extractor_name, fallback_reason, rejected_candidates = self._execute_actions(plan, chunks, text or "")
 
         # 7. deterministic derivations
         derivation_results = self._apply_derivation_tools()
@@ -304,6 +308,7 @@ class QrestAgent:
             fallback_reason=fallback_reason,
             tool_results=tool_results,
             action_results=action_results,
+            rejected_candidates=rejected_candidates,
         )
 
     # ---- actions 执行器 ----
@@ -316,6 +321,7 @@ class QrestAgent:
     ) -> tuple[list[Candidate], dict[str, Any], str, str | None]:
         pending = list(chunks)
         candidates: list[Candidate] = []
+        rejected_candidates: list[dict[str, Any]] = []
         action_results: dict[str, Any] = {}
         extractor_name = "unknown"
         fallback_reason: str | None = None
@@ -336,8 +342,24 @@ class QrestAgent:
                     continue
                 turn_candidates, extractor_name, fallback_reason = self._extract(pending, plan, text)
                 candidates.extend(turn_candidates)
-                # 所有提取结果先进入 Working State（设计文档 §3.5：唯一事实中心）
-                self.working_state.submit_all(turn_candidates)
+                # 所有提取结果先进入 Working State（设计文档 §3.5：唯一事实中心）；
+                # 结构非法候选在进入前被 Schema Gate 拒绝并记录（方案 §12-§20/§48）
+                for candidate in turn_candidates:
+                    shape = validate_shape(candidate.field_path, candidate.value)
+                    if not shape.valid:
+                        rejected_candidates.append(_rejected_candidate_dict(candidate, shape))
+                        continue
+                    try:
+                        self.working_state.submit(candidate)
+                    except SchemaViolation as exc:
+                        rejected_candidates.append({
+                            "field_path": exc.field_path,
+                            "value": candidate.value,
+                            "rejected": True,
+                            "reason": exc.reason,
+                            "expected": exc.expected,
+                            "actual": exc.actual,
+                        })
                 pending = []
             elif action.type == "tool":
                 tool_name = action.tool
@@ -378,7 +400,7 @@ class QrestAgent:
                 break
             elif action.type == "respond":
                 break
-        return candidates, action_results, extractor_name, fallback_reason
+        return candidates, action_results, extractor_name, fallback_reason, rejected_candidates
 
     def _resolve_placeholders(self, value: Any, action_results: dict[str, Any]) -> Any:
         if isinstance(value, str):
@@ -550,6 +572,17 @@ class QrestAgent:
             return RuleBasedExtractor().extract(chunks), "rule", None
         except Exception as exc:
             return [], "rule", f"rule extraction failed: {exc}"
+
+
+def _rejected_candidate_dict(candidate: Candidate, shape: Any) -> dict[str, Any]:
+    return {
+        "field_path": candidate.field_path,
+        "value": candidate.value,
+        "rejected": True,
+        "reason": "; ".join(shape.errors) or f"expected {shape.expected}, got {shape.actual}",
+        "expected": shape.expected,
+        "actual": shape.actual,
+    }
 
 
 def _state_entry(state: Any, reason: str) -> dict[str, Any]:

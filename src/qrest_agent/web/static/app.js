@@ -178,6 +178,18 @@ function appendMessage(role, text, payload, attachmentNames) {
       (turn.fallback_reason ? "; fallback=" + turn.fallback_reason : "");
     item.append(detail);
   }
+  if (payload && payload.rejected_candidates && payload.rejected_candidates.length) {
+    const detail = document.createElement("div");
+    detail.className = "role bad";
+    const rejected = payload.rejected_candidates;
+    const summary = rejected.slice(0, 3).map((entry) => {
+      const reason = (entry.reason || "").replace(/InstrumentInfo\.|BuildingInfo\.|DataInfo\./g, "");
+      return entry.field_path + " → " + reason;
+    });
+    detail.textContent = "Schema 拒绝 " + rejected.length + " 项（未写入项目状态）：" + summary.join("；") +
+      (rejected.length > 3 ? "…" : "");
+    item.append(detail);
+  }
   messages.append(item);
   messages.scrollTop = messages.scrollHeight;
 }

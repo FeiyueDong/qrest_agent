@@ -1,6 +1,7 @@
 from typing import Any
 
 from qrest_agent.core.schema import QREST_REQUIRED_PATHS
+from qrest_agent.core.schema_gate import schema_context_text
 
 ALLOWED_FIELD_PATHS_TEXT = "\n".join(f"- {path}" for path in QREST_REQUIRED_PATHS)
 
@@ -37,7 +38,9 @@ Hard rules:
 Allowed field_path values:
 """.strip()
 
-EXTRACTION_SYSTEM_PROMPT = f"{_EXTRACTION_SYSTEM_PROMPT_PREFIX}\n{ALLOWED_FIELD_PATHS_TEXT}"
+#: 方案 §9-§10/§76：LLM 必须看到字段类型与嵌套结构（软约束第一层），
+#: 真正的结构安全由 Schema Gate / Working State / Validator / Exporter 保证。
+EXTRACTION_SYSTEM_PROMPT = f"{_EXTRACTION_SYSTEM_PROMPT_PREFIX}\n{ALLOWED_FIELD_PATHS_TEXT}\n\n{schema_context_text()}"
 
 
 AGENT_SYSTEM_PROMPT = """你是 qREST 专业 AI Agent（主 Agent），面向建筑结构轻量化地震监测（qREST）数据。

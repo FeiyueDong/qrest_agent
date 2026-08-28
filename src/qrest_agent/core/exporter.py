@@ -13,7 +13,8 @@ from qrest_agent.core.metadata_policy import (
 )
 from qrest_agent.core.models import ValidationReport
 from qrest_agent.core.path import get_path, set_path
-from qrest_agent.core.schema import DEFAULT_METADATA
+from qrest_agent.core.schema import DEFAULT_METADATA, QREST_REQUIRED_PATHS
+from qrest_agent.core.schema_gate import validate_shape
 from qrest_agent.core.validator import validate_state
 
 
@@ -86,6 +87,31 @@ def prepare_metadata_export(state: Any, include_reserved_analysis: bool = True) 
     for path, policy in field_policies_by_path().items():
         if path not in annotations and not is_blank(get_path(metadata, path)):
             annotations[path] = "evidenced"
+
+    # 方案 §32-§34：Export Final Gate —— 最终 metadata 必须满足 Schema 形状，
+    # 即使 Working State 内部因 bug 出现非法结构也必须阻止导出。
+    # （嵌套 mandatory keys 已由 validate_state 的 Domain 层按字段政策检查）
+    final_schema_errors: list[tuple[str, str]] = []
+    for path in QREST_REQUIRED_PATHS:
+        value = get_path(metadata, path)
+        if is_blank(value):
+            continue
+        result = validate_shape(path, value)
+        if not result.valid:
+            final_schema_errors.append((path, "; ".join(result.errors)))
+    if final_schema_errors:
+        blocked = list(dict.fromkeys([path for path, _ in final_schema_errors] + blocked))
+        return MetadataExportResult(
+            ok=False,
+            metadata=None,
+            report=report,
+            blocked_fields=blocked,
+            field_annotations={path: "blocked" for path in blocked},
+            messages=[
+                "最终 metadata 未通过 Schema 校验，已阻止导出。",
+                *[f"{path}: {message}" for path, message in final_schema_errors[:10]],
+            ],
+        )
 
     messages: list[str] = []
     if defaulted:
