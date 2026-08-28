@@ -75,6 +75,14 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
     assert "attachmentChips" in index_html
     assert ".messages" in style_css
 
+    # 徽章语义分离：Agent（运行模式）与项目就绪（元数据校验）是两个概念
+    assert 'id="agentBadge"' in index_html
+    assert "智能体运行模式" in index_html
+    assert "项目就绪: " in app_js
+    assert "ready: yes" not in app_js
+    assert "与智能体是否可用无关" in app_js
+    assert "runtimeBadge" not in index_html
+
     # 新状态模型（§34-§35）：已确认 / 待确认 / 缺失 / 冲突
     for key in ("accepted", "pending", "missing", "conflict"):
         assert f'data-record-filter="{key}"' in index_html

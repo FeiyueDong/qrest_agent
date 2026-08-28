@@ -189,11 +189,19 @@ function renderSession() {
   const runtime = session.runtime || {};
   const recordSets = collectRecordSets(records, report);
   document.querySelector("#sessionBadge").textContent = "session: " + (session.session_id || "...");
-  document.querySelector("#runtimeBadge").textContent = runtime.model
-    ? "runtime: " + runtime.provider + " / " + runtime.model
-    : "runtime: " + (runtime.provider || "rule");
+  // Agent 徽章：智能体运行模式（配置层面）。没有 LLM 时仍是可用状态（规则模式），
+  // 与下方的“项目就绪”（元数据校验）是两个完全不同的概念。
+  const agentBadge = document.querySelector("#agentBadge");
+  if (runtime.model) {
+    agentBadge.textContent = "Agent: " + runtime.provider + " / " + runtime.model;
+    agentBadge.title = "智能体运行模式：已配置 LLM（" + runtime.provider + "）";
+  } else {
+    agentBadge.textContent = "Agent: " + (runtime.provider || "rule") + "（规则模式）";
+    agentBadge.title = "未配置 LLM，智能体以确定性规则模式运行——对话功能仍然可用";
+  }
   const readyBadge = document.querySelector("#readyBadge");
-  readyBadge.textContent = "ready: " + (report.ready ? "yes" : "no");
+  readyBadge.textContent = "项目就绪: " + (report.ready ? "是" : "否");
+  readyBadge.title = "项目元数据校验状态（由确定性 Validator 判定），与智能体是否可用无关；未就绪表示仍缺必要字段或存在冲突";
   readyBadge.classList.toggle("ready", !!report.ready);
   document.querySelector("#acceptedCount").textContent = String(recordSets.accepted.length);
   document.querySelector("#pendingCount").textContent = String(recordSets.pending.length);
