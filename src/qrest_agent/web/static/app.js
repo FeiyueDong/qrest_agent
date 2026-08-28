@@ -28,6 +28,10 @@ const attachmentChips = document.querySelector("#attachmentChips");
 const attachmentStatus = document.querySelector("#attachmentStatus");
 const turnActivity = document.querySelector("#turnActivity");
 const turnBadge = document.querySelector("#turnBadge");
+const recentTurns = document.querySelector("#recentTurns");
+const recentTurnCount = document.querySelector("#recentTurnCount");
+const inputList = document.querySelector("#inputList");
+const inputCount = document.querySelector("#inputCount");
 
 async function api(path, options = {}) {
   const headers = Object.assign({"Content-Type": "application/json"}, options.headers || {});
@@ -198,9 +202,68 @@ function renderSession() {
   renderFilterButtons();
   renderSkills(session);
   renderArtifacts(session);
+  renderRecentTurns(session);
+  renderInputs(session);
   renderRecords(recordSets[state.recordFilter] || recordSets.accepted, state.recordFilter);
   if (session.last_turn && !turnBadge.dataset.latest) {
     renderTurnActivity(session.last_turn);
+  }
+}
+
+function renderRecentTurns(session) {
+  const turns = (session.turns || []).filter((t) => t.role === "assistant" && t.payload && t.payload.turn);
+  recentTurnCount.textContent = turns.length + " 轮";
+  recentTurns.replaceChildren();
+  if (!turns.length) {
+    const empty = document.createElement("div");
+    empty.className = "recent-turn-item muted";
+    empty.textContent = "暂无历史回合";
+    recentTurns.append(empty);
+    return;
+  }
+  for (const t of turns.slice(-5).reverse()) {
+    const turn = t.payload.turn;
+    const item = document.createElement("div");
+    item.className = "recent-turn-item";
+    const intent = document.createElement("div");
+    intent.className = "rt-intent";
+    intent.textContent = (turn.intent || "unknown") + " · " + ((turn.actions || []).length) + " actions";
+    const meta = document.createElement("div");
+    meta.className = "rt-meta";
+    const skills = (turn.skills || []).join(",") || "-";
+    meta.textContent = "skills: " + skills + (turn.extractor ? " · " + turn.extractor : "");
+    item.append(intent, meta);
+    recentTurns.append(item);
+  }
+}
+
+function renderInputs(session) {
+  const attachments = session.attachments || [];
+  inputCount.textContent = attachments.length + " 项";
+  inputList.replaceChildren();
+  if (!attachments.length) {
+    const empty = document.createElement("div");
+    empty.className = "input-item muted";
+    empty.textContent = "暂无附件";
+    inputList.append(empty);
+    return;
+  }
+  for (const attachment of attachments.slice(-10).reverse()) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "input-item";
+    const status = attachment.status === "used" ? "✓ 已使用" : "待发送";
+    const span = document.createElement("span");
+    span.className = attachment.status === "used" ? "used" : "pending";
+    span.textContent = "[" + status + "] " + (attachment.name || "?");
+    item.append(span);
+    if (attachment.status === "used") {
+      item.title = "查看附件内容";
+      item.addEventListener("click", () => showArtifact({name: "uploads/" + (attachment.name || "")}));
+    } else {
+      item.title = "将随下一条消息发送";
+    }
+    inputList.append(item);
   }
 }
 

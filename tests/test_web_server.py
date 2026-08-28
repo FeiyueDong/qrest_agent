@@ -83,17 +83,35 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
     assert 'id="missingCount"' in index_html
     assert 'id="conflictCount"' in index_html
 
-    # 可折叠布局：This Turn 移到左侧（消息区与输入框之间），Skills/Artifacts 右侧折叠
-    assert '<details class="panel collapsible turn-panel" id="turnPanel">' in index_html
+    # 三栏布局：最左侧 Agent Activity 栏（This Turn/Recent Turns/Inputs/Skills/Artifacts），
+    # 中间 Conversation，右侧 Project State + Fields
+    assert 'class="activity"' in index_html
+    assert 'class="workspace"' in index_html
+    assert '<details class="panel collapsible" id="turnPanel" open>' in index_html
+    assert '<details class="panel collapsible" id="recentTurnsPanel">' in index_html
+    assert '<details class="panel collapsible" id="inputsPanel">' in index_html
     assert '<details class="panel collapsible" id="skillsPanel">' in index_html
     assert '<details class="panel collapsible" id="artifactsPanel">' in index_html
-    # 折叠面板默认不带 open 属性（折叠时只占一行）
-    assert '<details class="panel collapsible turn-panel" id="turnPanel" open>' not in index_html
+    # 折叠面板默认不带 open 属性（折叠时只占一行）；This Turn 默认展开
     assert '<details class="panel collapsible" id="skillsPanel" open>' not in index_html
-    # This Turn 位于 composer 之前（左侧），Skills/Artifacts 位于 Fields 之后（右侧底部）
+    assert '<details class="panel collapsible" id="artifactsPanel" open>' not in index_html
+    assert '<details class="panel collapsible" id="recentTurnsPanel" open>' not in index_html
+    assert '<details class="panel collapsible" id="inputsPanel" open>' not in index_html
+    # DOM 顺序：Activity 栏在最前（This Turn 不再夹在消息区与输入框之间）
+    assert index_html.index('class="activity"') < index_html.index('class="workspace"')
     assert index_html.index('id="turnPanel"') < index_html.index('id="chatForm"')
-    assert index_html.index('id="recordsTree"') < index_html.index('id="skillsPanel"')
+    assert index_html.index('id="turnPanel"') < index_html.index('id="recentTurnsPanel"')
+    assert index_html.index('id="recentTurnsPanel"') < index_html.index('id="inputsPanel"')
+    assert index_html.index('id="inputsPanel"') < index_html.index('id="skillsPanel"')
     assert index_html.index('id="skillsPanel"') < index_html.index('id="artifactsPanel"')
+    # 右侧 side 只剩 Project State + Fields；Skills/Artifacts 不再在右侧
+    assert index_html.index('id="artifactsPanel"') < index_html.index('id="recordsTree"')
+    # 布局保护：只有 Fields 允许伸缩，防止内容多时挤压/遮盖 Project State
+    assert ".side > .panel:not(.records-panel)" in style_css
+    assert "grid-template-columns: 250px minmax(0, 1fr) 420px" in style_css
+    # 左侧新输出：Recent Turns / Inputs 渲染逻辑存在
+    assert "renderRecentTurns" in app_js
+    assert "renderInputs" in app_js
 
     # 旧概念已删除（§42-§44）
     assert "taskLogList" not in index_html

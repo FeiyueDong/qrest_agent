@@ -8,6 +8,54 @@
 </head>
 <body>
   <main class="app">
+    <aside class="activity">
+      <header class="topbar activity-head">
+        <h1>Agent Activity</h1>
+      </header>
+
+      <details class="panel collapsible" id="turnPanel" open>
+        <summary>
+          <span class="panel-title">This Turn</span>
+          <span class="badge" id="turnBadge">尚未有 Agent 回合。</span>
+        </summary>
+        <div class="turn-activity" id="turnActivity">
+          <div class="muted">尚未有 Agent 回合。</div>
+        </div>
+      </details>
+
+      <details class="panel collapsible" id="recentTurnsPanel">
+        <summary>
+          <span class="panel-title">Recent Turns</span>
+          <span class="muted" id="recentTurnCount"></span>
+        </summary>
+        <div class="recent-turns" id="recentTurns"></div>
+      </details>
+
+      <details class="panel collapsible" id="inputsPanel">
+        <summary>
+          <span class="panel-title">Inputs</span>
+          <span class="muted" id="inputCount"></span>
+        </summary>
+        <div class="input-list" id="inputList"></div>
+      </details>
+
+      <details class="panel collapsible" id="skillsPanel">
+        <summary>
+          <span class="panel-title">Skills</span>
+          <span class="muted" id="skillCount"></span>
+        </summary>
+        <div class="skill-list" id="skillList"></div>
+      </details>
+
+      <details class="panel collapsible" id="artifactsPanel">
+        <summary>
+          <span class="panel-title">Artifacts</span>
+          <span class="muted" id="artifactCount"></span>
+        </summary>
+        <div class="artifact-list" id="artifactList"></div>
+      </details>
+    </aside>
+
     <section class="workspace">
       <header class="topbar">
         <h1>qREST Agent</h1>
@@ -19,16 +67,6 @@
       </header>
 
       <section class="messages" id="messages" aria-live="polite"></section>
-
-      <details class="panel collapsible turn-panel" id="turnPanel">
-        <summary>
-          <span class="panel-title">This Turn</span>
-          <span class="badge" id="turnBadge">尚未有 Agent 回合。</span>
-        </summary>
-        <div class="turn-activity" id="turnActivity">
-          <div class="muted">尚未有 Agent 回合。</div>
-        </div>
-      </details>
 
       <form class="composer" id="chatForm">
         <textarea id="messageInput" placeholder="输入任务或工程描述，例如：请根据这些资料整理当前项目的信息；或：用当前项目状态生成 qREST"></textarea>
@@ -48,7 +86,7 @@
     </section>
 
     <aside class="side">
-      <section class="panel">
+      <section class="panel state-panel">
         <div class="panel-header">
           <h2>Project State</h2>
           <button id="refreshButton" type="button">刷新</button>
@@ -68,23 +106,6 @@
         </div>
         <div class="records-tree" id="recordsTree"></div>
       </section>
-
-      <details class="panel collapsible" id="skillsPanel">
-        <summary>
-          <span class="panel-title">Skills</span>
-          <span class="muted" id="skillCount"></span>
-        </summary>
-        <div class="muted">主 Agent 按任务动态选择 Skill 并加载完整指令。</div>
-        <div class="skill-list" id="skillList"></div>
-      </details>
-
-      <details class="panel collapsible" id="artifactsPanel">
-        <summary>
-          <span class="panel-title">Artifacts</span>
-          <span class="muted" id="artifactCount"></span>
-        </summary>
-        <div class="artifact-list" id="artifactList"></div>
-      </details>
     </aside>
   </main>
 
