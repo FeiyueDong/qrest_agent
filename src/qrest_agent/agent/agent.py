@@ -608,7 +608,12 @@ class QrestAgent:
         param_width = parameters.value.get("Width")
         if not isinstance(param_length, int | float) or not isinstance(param_width, int | float):
             return
-        if bbox is None or bbox.value is None:
+        # 参数变更后旧 derived 包围盒失效：Parameters revision 更新则重算；
+        # 用户确认/提取的 BoundingBox 不覆盖。
+        needs_bbox = bbox is None or bbox.value is None or (
+            bbox.status == "derived" and parameters.revision > bbox.revision
+        )
+        if needs_bbox:
             output = self.tools.execute("calculate_bounding_box", {"length": float(param_length), "width": float(param_width)})
             state.derive(
                 "BuildingInfo.StructuralFootprint.BoundingBox",
@@ -698,6 +703,8 @@ class QrestAgent:
             selected_skills=list(plan.skills),
             skill_instructions=_load_skill_instructions(self.skills, plan.skills),
             user_message=text,
+            # correction 时把当前已知值给模型：对象字段需输出完整值（保留未提及子字段）
+            current_values=_current_known_values(self.working_state) if plan.intent == "correction" else {},
         )
         if isinstance(self.extractor, LLMExtractor):
             fallback_reason: str | None = None
@@ -717,6 +724,21 @@ class QrestAgent:
             return RuleBasedExtractor().extract(chunks), "rule", None
         except Exception as exc:
             return [], "rule", f"rule extraction failed: {exc}"
+
+
+def _current_known_values(state: WorkingState, max_value_chars: int = 600) -> dict[str, Any]:
+    """当前可导出已知值（correction 上下文；大值截断防 prompt 膨胀）。"""
+    import json
+
+    values: dict[str, Any] = {}
+    for path, field in state.fields.items():
+        if field.value is None or field.status not in EXPORTABLE_STATUSES:
+            continue
+        rendered = json.dumps(field.value, ensure_ascii=False, default=str)
+        if len(rendered) > max_value_chars:
+            rendered = rendered[:max_value_chars] + "…"
+        values[path] = json.loads(rendered) if rendered.endswith("…") else field.value
+    return values
 
 
 def _fact_value(state: WorkingState, fact_path: str) -> Any:

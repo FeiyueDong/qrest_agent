@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 from qrest_agent.core.schema import QREST_REQUIRED_PATHS
@@ -55,7 +56,11 @@ Hard rules:
     For free-text fields (ProjectName/Provider/EventName/ChannelID): use the ASCII
     identifier from the source when present; if only Chinese is available, do NOT
     invent an English name — output status="uncertain" or omit the field.
-12. Facts are trustworthy intermediate facts (方案): paths start with "Building." or
+13. Intent="correction": the user is correcting a known field. Output the FULL
+    field value with status="confirmed" and the user message as evidence. For object
+    fields (e.g. StructuralFootprint.Parameters) keep untouched sub-fields from the
+    current known values and change only what the user corrected.
+14. Metadata strings must be canonical English/ASCII: controlled fields MUST use the
     "Monitoring." (e.g. Building.above_ground_floors, Building.basement_floors,
     Building.first_floor_height, Building.typical_story_height,
     Building.basement_first_height, Building.basement_second_height,
@@ -142,7 +147,7 @@ AGENT_PLANNING_PROMPT = """你是 qREST 主 Agent 的规划步骤。给定用户
 
 
 def build_extraction_user_prompt(text: str, context: dict[str, Any] | None = None) -> str:
-    """构造 Extraction 用户消息：稳定指令 + 本轮 intent + 相关 Skill 指令 + 来源文本（§6/§7）。"""
+    """构造 Extraction 用户消息：稳定指令 + 本轮 intent + 相关 Skill 指令 + 当前值 + 来源文本（§6/§7）。"""
     parts: list[str] = []
     if context:
         intent = context.get("intent")
@@ -154,6 +159,12 @@ def build_extraction_user_prompt(text: str, context: dict[str, Any] | None = Non
         skill_instructions = context.get("skill_instructions") or []
         if skill_instructions:
             parts.append("Skill instructions:\n" + "\n\n".join(f"- {item}" for item in skill_instructions))
+        current_values = context.get("current_values") or {}
+        if current_values:
+            parts.append(
+                "Current known values (for correction, output the FULL field value, "
+                "keeping untouched sub-fields):\n" + json.dumps(current_values, ensure_ascii=False, default=str)
+            )
     parts.append("Source:\n" + text)
     return (
         "Extract qREST metadata candidates from this source text. "

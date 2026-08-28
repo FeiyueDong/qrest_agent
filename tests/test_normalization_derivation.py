@@ -299,6 +299,45 @@ def test_channel_num_only_keeps_channels_missing(artifact_dir: Path) -> None:
     assert "Channels" not in agent.to_metadata().get("InstrumentInfo", {})
 
 
+def test_parameters_correction_recomputes_bbox_without_conflict() -> None:
+    """修正 Parameters 后旧 derived BoundingBox 应被确定性重算，而不是变成 conflict。"""
+    agent = QrestAgent()
+    agent.working_state.set("BuildingInfo.StructuralFootprint.Shape", "Rectangular",
+                            evidence=[StateEvidence(source_id="doc", text="rect")])
+    agent.working_state.set("BuildingInfo.StructuralFootprint.Parameters", {"Length": 42.0, "Width": 25.2},
+                            evidence=[StateEvidence(source_id="doc", text="42x25.2")])
+    agent.run_turn("")  # derivation pass: BoundingBox derived
+    bbox = agent.working_state.get("BuildingInfo.StructuralFootprint.BoundingBox")
+    assert bbox is not None and bbox.status == "derived"
+    assert bbox.value["MaxX"] == 21.0
+
+    # 用户修正长度 → Parameters confirmed 46.9
+    agent.working_state.confirm("BuildingInfo.StructuralFootprint.Parameters",
+                                {"Length": 46.9, "Width": 25.2},
+                                evidence=[StateEvidence(source_id="user", text="改为46.9m")])
+    agent.run_turn("")  # derivation pass: bbox recomputed
+
+    bbox = agent.working_state.get("BuildingInfo.StructuralFootprint.BoundingBox")
+    assert bbox is not None
+    assert bbox.status == "derived", "重算结果不应变成 conflict"
+    assert bbox.value == {"MaxX": 23.45, "MinX": -23.45, "MaxY": 12.6, "MinY": -12.6}
+    # 无冲突
+    from qrest_agent.core.validator import validate_state
+
+    assert validate_state(agent.working_state).conflicts == []
+
+
+def test_derived_to_derived_recompute_overwrites_old_value() -> None:
+    """WorkingState 合并：derived→derived 不同值 = 确定性重算覆盖，不产生 alternatives。"""
+    state = WorkingState.empty()
+    state.derive("BuildingInfo.ElevationNum", 3, derived_from=["BuildingInfo.Elevation"])
+    state.derive("BuildingInfo.ElevationNum", 5, derived_from=["BuildingInfo.Elevation"])
+    record = state.get("BuildingInfo.ElevationNum")
+    assert record.value == 5
+    assert record.status == "derived"
+    assert record.alternatives == []
+
+
 def test_facts_never_enter_metadata_or_schema_gate(artifact_dir: Path) -> None:
     """Intermediate Facts 不参与 metadata 导出，也不受 schema gate 约束（但仍需证据）。"""
     agent = QrestAgent()

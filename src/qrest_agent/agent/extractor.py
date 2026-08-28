@@ -41,12 +41,15 @@ class ExtractionContext:
     selected_skills: list[str] = field(default_factory=list)
     skill_instructions: list[str] = field(default_factory=list)
     user_message: str = ""
+    #: 当前已知字段值（correction 时帮助模型输出完整对象，保留未提及的子字段）
+    current_values: dict[str, Any] = field(default_factory=dict)
 
     def to_prompt_dict(self) -> dict[str, Any]:
         return {
             "intent": self.intent,
             "selected_skills": list(self.selected_skills),
             "skill_instructions": list(self.skill_instructions),
+            "current_values": dict(self.current_values),
         }
 
 

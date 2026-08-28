@@ -488,6 +488,18 @@ class WorkingState:
             state.revision += 1
             return state
 
+        if state.status == "derived" and status == "derived":
+            # 确定性重算覆盖旧 derived 值（如 Parameters 修正后 BoundingBox 重算）；
+            # 旧 derived 值是程序生成，输入变化后作废，不构成用户数据冲突
+            state.value = deepcopy(value)
+            state.status = status
+            state.confidence = confidence
+            state.evidence = list(evidence)
+            state.derived_from = list(derived_from or [])
+            state.updated_by = updated_by
+            state.revision += 1
+            return state
+
         if status == "confirmed":
             state.alternatives.append(
                 Alternative(
