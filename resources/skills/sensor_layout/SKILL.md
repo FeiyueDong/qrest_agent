@@ -16,13 +16,13 @@ description: 测点布置判断：监测楼层与每层测点数的布置原则
 2. 缺任一项 → 不生成，标记 missing 并向用户询问。
 3. 每层测点数当前只支持 3（左右两侧 + 中部），其他数量不支持时询问。
 
-## 确定性约定（调用 derive_channel_layout）
+## 布置生成的前提
 
-- 通道按楼层顺序、每层内按模板顺序编号，ChannelNo 从 1 连续递增；
-- 左右测点 X = ±max(长度/2 - 0.4, 长度/2 × 0.95)，Y 线 = -宽度/6；
-- 左右测点 Azimuth=90°，中部测点 Azimuth=0°；
-- LocationXYZ 保留 1 位小数；ChannelID 未知写 "UNKNOWN"（询问，不编造）；
-- DeviceType 仅当资料给出传感器型号时填写。
+- 当前没有注册的通道布置模板 Tool（derive_channel_layout 已移除）；
+- 只有在 qREST 明确定义标准布置模板并注册对应 Tool 后，才能按模板确定性生成；
+- 在此之前：资料给出完整逐通道配置（表格/坐标/方向/量程）→ 直接生成 Channels 数组；
+  资料只有模糊描述（楼层 + 每层测点数）→ Channels 保持 missing，询问用户实际布置；
+  ChannelID 未知写 "UNKNOWN"；DeviceType 仅当资料给出传感器型号时填写。
 
 ## 必须询问，禁止猜测
 

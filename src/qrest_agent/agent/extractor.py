@@ -22,6 +22,11 @@ _ALLOWED_CANDIDATE_STATUSES = {
     "conflict",
 }
 
+#: Intermediate Facts 的路径命名空间（方案 §6-§7）：以这些前缀开头的候选是
+#: 推理中间事实（Building.above_ground_floors、Monitoring.monitored_floors 等），
+#: 永不导出为 Metadata。
+FACT_PREFIXES: tuple[str, ...] = ("Building.", "Monitoring.")
+
 
 @dataclass(slots=True)
 class ExtractionContext:
@@ -80,6 +85,14 @@ class LLMExtractor:
                 if validated is None:
                     continue
                 _apply_correction_promotion(validated, chunk, context)
+                candidates.append(validated)
+            for item in result.get("facts", []):
+                candidate = _fact_from_model_item(item, chunk)
+                if candidate is None:
+                    continue
+                validated = _validate_llm_candidate(candidate, chunk)
+                if validated is None:
+                    continue
                 candidates.append(validated)
         return candidates
 
@@ -276,6 +289,35 @@ def _candidate_from_model_item(item: Any, chunk: SourceChunk) -> Candidate | Non
     return Candidate.from_dict(item)
 
 
+def _fact_from_model_item(item: Any, chunk: SourceChunk) -> Candidate | None:
+    """方案 §6：Intermediate Fact（path/value/status/evidence）→ Candidate。
+
+    只接受以 FACT_PREFIXES 开头的路径；facts 与 metadata 一样必须带可验证证据。
+    """
+    if not isinstance(item, dict):
+        return None
+    field_path = str(item.get("path") or item.get("field_path") or "")
+    if not field_path.startswith(FACT_PREFIXES):
+        return None
+    return Candidate(
+        field_path=field_path,
+        value=item.get("value"),
+        status=item.get("status", "extracted"),
+        confidence=float(item.get("confidence", 0.6) or 0.6),
+        evidence=_evidence_from_item(item, chunk),
+    )
+
+
+def _evidence_from_item(item: dict[str, Any], chunk: SourceChunk) -> list[Evidence]:
+    evidence_items: list[dict[str, Any]] = []
+    raw_evidence = item.get("evidence")
+    if isinstance(raw_evidence, list):
+        for evidence in raw_evidence:
+            if isinstance(evidence, dict):
+                evidence_items.append(evidence)
+            elif isinstance(evidence, str):
+                evidence_items.append({"source_id": chunk.source_id, "location": chunk.location, "text": evidence})
+    return [Evidence.from_dict(entry) for entry in evidence_items]
 def _normalize_model_value(field_path: str, value: Any, status: Any) -> Any:
     if isinstance(value, str) and value.strip().lower() in {"null", "none", "missing", ""}:
         return None

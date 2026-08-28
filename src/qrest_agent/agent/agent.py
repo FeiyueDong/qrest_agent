@@ -4,11 +4,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from qrest_agent.agent.extractor import ExtractionContext, LLMExtractor, RuleBasedExtractor
+from qrest_agent.agent.extractor import FACT_PREFIXES, ExtractionContext, LLMExtractor, RuleBasedExtractor
 from qrest_agent.agent.planner import ActionSpec, AgentPlanner, TurnPlan
 from qrest_agent.agent.prompts import AGENT_SYSTEM_PROMPT
 from qrest_agent.agent.responder import Responder
 from qrest_agent.agent.tool_registry import ToolRegistry
+from qrest_agent.core.canonicalize import canonicalize_value
 from qrest_agent.core.exporter import MetadataExportResult, prepare_metadata_export as _prepare_metadata_export
 from qrest_agent.core.models import Candidate, ValidationReport
 from qrest_agent.core.schema import QREST_TRACKED_PATHS
@@ -237,6 +238,11 @@ class QrestAgent:
             "accepted_facts": accepted,
             "uncertain": uncertain,
             "inferred": inferred,
+            "facts": [
+                {"fact": state.field_path, "value": state.value, "status": state.status}
+                for state in self.working_state.facts.values()
+                if state.value is not None
+            ],
             "conflicts": list(report.conflicts),
             "missing_required": list(report.missing_required),
             "missing_important": list(report.missing_important),
@@ -345,6 +351,19 @@ class QrestAgent:
                 # 所有提取结果先进入 Working State（设计文档 §3.5：唯一事实中心）；
                 # 结构非法候选在进入前被 Schema Gate 拒绝并记录（方案 §12-§20/§48）
                 for candidate in turn_candidates:
+                    if candidate.field_path.startswith(FACT_PREFIXES):
+                        # 中间事实（方案 §6）：永不导出，不入 schema/metadata；
+                        # 证据已在提取器校验。只按路径前缀识别，绝不混入正式字段。
+                        self.working_state.submit_fact(candidate)
+                        continue
+                    # Canonicalization（方案 §3-§4）：受控字段中文→英文标准值；
+                    # 自由字段/无法映射的非 ASCII 值 → uncertain（不进入最终 Metadata）
+                    canon = canonicalize_value(candidate.field_path, candidate.value)
+                    if canon.status == "failed":
+                        candidate.status = "uncertain"
+                        candidate.confidence = min(candidate.confidence, 0.4)
+                    else:
+                        candidate.value = canon.value
                     shape = validate_shape(candidate.field_path, candidate.value)
                     if not shape.valid:
                         rejected_candidates.append(_rejected_candidate_dict(candidate, shape))
@@ -480,9 +499,18 @@ class QrestAgent:
     # ---- 内部 ----
 
     def _apply_derivation_tools(self) -> list[dict[str, Any]]:
-        """回合内确定性推导（设计文档 §12.3/§11.3）：derived + tool 证据落库。"""
+        """Derivation Pass（方案 §8-§10）：基于缺失字段 + 可信 Facts + Tool 的确定性推导。
+
+        顺序：StructuralFootprint（facts → Parameters → BoundingBox）→
+        Elevation（facts → derive_elevation_profile → Elevation → ElevationNum）→
+        数组计数（ElevationNum/ChannelNum）→ Frequency。
+        所有结果以 derived 状态 + tool 证据落库；已有 confirmed/extracted 值不覆盖。
+        """
         results: list[dict[str, Any]] = []
         state = self.working_state
+
+        self._derive_footprint(state, results)
+        self._derive_elevation_profile(state, results)
 
         elevation = state.get("BuildingInfo.Elevation")
         if elevation is not None and isinstance(elevation.value, list) and elevation.value:
@@ -539,6 +567,123 @@ class QrestAgent:
 
         return results
 
+    def _derive_footprint(self, state: WorkingState, results: list[dict[str, Any]]) -> None:
+        """方案 §9：矩形平面 + footprint_length/width Facts → Parameters + BoundingBox。
+
+        只有 Shape 已确认 Rectangular 且 Facts 有长宽时才推导；
+        不能仅凭尺寸假设形状（Accuracy First）。
+        """
+        shape = state.get("BuildingInfo.StructuralFootprint.Shape")
+        parameters = state.get("BuildingInfo.StructuralFootprint.Parameters")
+        bbox = state.get("BuildingInfo.StructuralFootprint.BoundingBox")
+        if shape is None or shape.value != "Rectangular":
+            return
+
+        length = _fact_value(state, "Building.footprint_length")
+        width = _fact_value(state, "Building.footprint_width")
+        if length is not None and width is not None and (parameters is None or parameters.value is None):
+            state.derive(
+                "BuildingInfo.StructuralFootprint.Parameters",
+                {"Length": float(length), "Width": float(width)},
+                derived_from=["Building.footprint_length", "Building.footprint_width"],
+                evidence=[Evidence(
+                    source_id="tool:derive_footprint",
+                    source_type="tool",
+                    tool="derive_footprint",
+                    derived_from=["Building.footprint_length", "Building.footprint_width"],
+                    text="Parameters = {Length, Width} from footprint facts",
+                )],
+                confidence=0.9,
+                updated_by="tool",
+            )
+            results.append({"tool": "derive_footprint", "field_path": "BuildingInfo.StructuralFootprint.Parameters",
+                            "value": {"Length": float(length), "Width": float(width)},
+                            "derived_from": ["Building.footprint_length", "Building.footprint_width"]})
+
+        parameters = state.get("BuildingInfo.StructuralFootprint.Parameters")
+        bbox = state.get("BuildingInfo.StructuralFootprint.BoundingBox")
+        if parameters is None or not isinstance(parameters.value, dict):
+            return
+        param_length = parameters.value.get("Length")
+        param_width = parameters.value.get("Width")
+        if not isinstance(param_length, int | float) or not isinstance(param_width, int | float):
+            return
+        if bbox is None or bbox.value is None:
+            output = self.tools.execute("calculate_bounding_box", {"length": float(param_length), "width": float(param_width)})
+            state.derive(
+                "BuildingInfo.StructuralFootprint.BoundingBox",
+                output["bounding_box"],
+                derived_from=["BuildingInfo.StructuralFootprint.Parameters"],
+                evidence=[Evidence(
+                    source_id="tool:calculate_bounding_box",
+                    source_type="tool",
+                    tool="calculate_bounding_box",
+                    derived_from=["BuildingInfo.StructuralFootprint.Parameters"],
+                    text="BoundingBox = calculate_bounding_box(Parameters)",
+                )],
+                confidence=1.0,
+                updated_by="tool",
+            )
+            results.append({"tool": "calculate_bounding_box",
+                            "field_path": "BuildingInfo.StructuralFootprint.BoundingBox",
+                            "value": output["bounding_box"],
+                            "derived_from": ["BuildingInfo.StructuralFootprint.Parameters"]})
+
+    def _derive_elevation_profile(self, state: WorkingState, results: list[dict[str, Any]]) -> None:
+        """方案 §10：层数/层高 Facts 齐全时调用 derive_elevation_profile 生成 Elevation。
+
+        任一必需 Fact 缺失（或缺少地下层高且地下层数 > 0 的约定）→ 保持 missing，
+        不按经验补充。
+        """
+        elevation = state.get("BuildingInfo.Elevation")
+        if elevation is not None and elevation.value is not None:
+            return
+
+        above = _fact_value(state, "Building.above_ground_floors")
+        basement = _fact_value(state, "Building.basement_floors")
+        first_height = _fact_value(state, "Building.first_floor_height")
+        typical_height = _fact_value(state, "Building.typical_story_height")
+        if above is None or basement is None or first_height is None or typical_height is None:
+            return
+
+        derived_from = ["Building.above_ground_floors", "Building.basement_floors",
+                        "Building.first_floor_height", "Building.typical_story_height"]
+        arguments: dict[str, Any] = {
+            "above_ground_floors": int(above),
+            "basement_floors": int(basement),
+            "first_floor_height": float(first_height),
+            "typical_above_height": float(typical_height),
+        }
+        basement_first = _fact_value(state, "Building.basement_first_height")
+        basement_second = _fact_value(state, "Building.basement_second_height")
+        if basement_first is not None:
+            arguments["basement_first_height"] = float(basement_first)
+            derived_from.append("Building.basement_first_height")
+        if basement_second is not None:
+            arguments["basement_second_height"] = float(basement_second)
+            derived_from.append("Building.basement_second_height")
+
+        output = self.tools.execute("derive_elevation_profile", arguments)
+        elevations = output["elevations"]
+        if not elevations:
+            return
+        state.derive(
+            "BuildingInfo.Elevation",
+            elevations,
+            derived_from=list(derived_from),
+            evidence=[Evidence(
+                source_id="tool:derive_elevation_profile",
+                source_type="tool",
+                tool="derive_elevation_profile",
+                derived_from=list(derived_from),
+                text="Elevation from floor-count/story-height facts via derive_elevation_profile",
+            )],
+            confidence=1.0,
+            updated_by="tool",
+        )
+        results.append({"tool": "derive_elevation_profile", "field_path": "BuildingInfo.Elevation",
+                        "value": elevations, "derived_from": derived_from})
+
     def _extract(
         self,
         chunks: list[SourceChunk],
@@ -572,6 +717,16 @@ class QrestAgent:
             return RuleBasedExtractor().extract(chunks), "rule", None
         except Exception as exc:
             return [], "rule", f"rule extraction failed: {exc}"
+
+
+def _fact_value(state: WorkingState, fact_path: str) -> Any:
+    """读取可信 Fact 的值（extracted/confirmed/derived；missing 或空值返回 None）。"""
+    fact = state.get_fact(fact_path)
+    if fact is None or fact.value is None:
+        return None
+    if fact.status in {"missing", "empty", "conflict"}:
+        return None
+    return fact.value
 
 
 def _rejected_candidate_dict(candidate: Candidate, shape: Any) -> dict[str, Any]:

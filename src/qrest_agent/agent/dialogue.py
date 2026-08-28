@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from qrest_agent.agent.agent import QrestAgent, TurnResult
+from qrest_agent.core.canonicalize import canonicalize_value
 from qrest_agent.core.models import Candidate, Evidence, ValidationReport
 from qrest_agent.core.schema import QREST_FIELD_SPECS_BY_PATH
 from qrest_agent.core.schema_gate import SchemaViolation
@@ -207,6 +208,11 @@ class ChatSession:
 
         raw_value = " ".join(parts[2:])
         value = _parse_confirmed_value(field_path, raw_value)
+        # 方案 §3-§4：确认值同样经过规范化（受控字段中文 → 标准英文值）
+        canon = canonicalize_value(field_path, value)
+        if canon.status == "failed":
+            return self._command_result(f"规范化失败：{canon.reason}", command=command)
+        value = canon.value
         evidence = [Evidence(source_id="user_confirmation", location="chat", text=raw_value)]
         try:
             self.agent.working_state.confirm(field_path, value, evidence, updated_by="user")

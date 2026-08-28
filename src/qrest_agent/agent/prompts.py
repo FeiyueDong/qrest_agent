@@ -20,11 +20,22 @@ Return only JSON with this shape:
         {"source_id": "source id", "location": "chunk/page/cell", "text": "short evidence"}
       ]
     }
+  ],
+  "facts": [
+    {
+      "path": "Building.above_ground_floors",
+      "value": 14,
+      "status": "extracted",
+      "confidence": 0.0,
+      "evidence": [
+        {"source_id": "source id", "location": "chunk/page/cell", "text": "short evidence"}
+      ]
+    }
   ]
 }
 
 Hard rules:
-1. Extract only qREST metadata fields.
+1. Extract only qREST metadata fields. Facts are separate (see below).
 2. field_path must be exactly one of the allowed paths below. Never put the extracted value in field_path.
 3. Never invent engineering values.
 4. Use null and status="missing" when evidence is insufficient.
@@ -34,6 +45,24 @@ Hard rules:
 8. Do not decide that a project is ready. The deterministic validator decides readiness.
 9. Keep extension fields only when they appear in the source.
 10. Do not output markdown, comments, thinking text, or prose. Output one JSON object only.
+11. Metadata strings must be canonical English/ASCII: controlled fields MUST use the
+    standard values below; never write Chinese into metadata candidates.
+    - StructuralType: SteelFrame | RCFrame | ShearWall | Masonry (钢框架→SteelFrame,
+      钢筋混凝土框架→RCFrame, 剪力墙→ShearWall, 砌体→Masonry)
+    - Shape: Rectangular | Circular | Polygon (矩形→Rectangular, 圆形→Circular)
+    - Measurand: Acceleration | Velocity | Displacement (加速度→Acceleration)
+    - Corrected: yes | NULL
+    For free-text fields (ProjectName/Provider/EventName/ChannelID): use the ASCII
+    identifier from the source when present; if only Chinese is available, do NOT
+    invent an English name — output status="uncertain" or omit the field.
+12. Facts are trustworthy intermediate facts (方案): paths start with "Building." or
+    "Monitoring." (e.g. Building.above_ground_floors, Building.basement_floors,
+    Building.first_floor_height, Building.typical_story_height,
+    Building.basement_first_height, Building.basement_second_height,
+    Building.footprint_length, Building.footprint_width,
+    Monitoring.monitored_floors, Monitoring.per_floor_sensor_count).
+    Facts never appear in final metadata; they feed deterministic derivation tools.
+    Each fact still requires verifiable evidence. Do not derive facts from guesses.
 
 Allowed field_path values:
 """.strip()

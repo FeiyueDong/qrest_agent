@@ -111,6 +111,9 @@ class WorkingState:
         self.base_metadata = deepcopy(base_metadata or {})
         self.tracked_paths = list(tracked_paths or [])
         self._fields: dict[str, FieldState] = {}
+        # Intermediate Facts（方案 §6-§7）：Agent 推理过程中的可信中间信息，
+        # 与 metadata 同库但永不导出；有 value/status/evidence。
+        self._facts: dict[str, FieldState] = {}
 
     # ---- 查询 ----
 
@@ -132,6 +135,62 @@ class WorkingState:
             state = FieldState(field_path=field_path)
             self._fields[field_path] = state
         return state
+
+    # ---- Intermediate Facts（方案 §6-§7）----
+
+    @property
+    def facts(self) -> dict[str, FieldState]:
+        return self._facts
+
+    def fact_paths(self) -> list[str]:
+        return sorted(self._facts)
+
+    def get_fact(self, fact_path: str) -> FieldState | None:
+        return self._facts.get(fact_path)
+
+    def set_fact(
+        self,
+        fact_path: str,
+        value: Any,
+        *,
+        status: str = "extracted",
+        confidence: float = 0.6,
+        evidence: list[Evidence] | None = None,
+        updated_by: str = "system",
+    ) -> FieldState:
+        """写入一条中间事实。facts 与 metadata 一样需要证据；
+        值不同时以最新为准（facts 是推理过程信息，不做冲突标记）。"""
+        state = self._facts.get(fact_path)
+        if state is None:
+            state = FieldState(field_path=fact_path, value=deepcopy(value), status=_normalize_status(status),
+                               confidence=confidence, evidence=list(evidence or []), updated_by=updated_by)
+            self._facts[fact_path] = state
+        else:
+            if state.value == value:
+                state.evidence.extend(list(evidence or []))
+                if status == "confirmed":
+                    state.status = "confirmed"
+            else:
+                state.value = deepcopy(value)
+                state.status = _normalize_status(status)
+                state.confidence = confidence
+                state.evidence = list(evidence or [])
+            state.updated_by = updated_by
+        state.revision += 1
+        return state
+
+    def submit_fact(self, candidate: Any, *, updated_by: str | None = None) -> FieldState:
+        return self.set_fact(
+            candidate.field_path,
+            candidate.value,
+            status=getattr(candidate, "status", "extracted"),
+            confidence=float(getattr(candidate, "confidence", 0.6) or 0.6),
+            evidence=list(getattr(candidate, "evidence", None) or []),
+            updated_by=updated_by or getattr(candidate, "updated_by", None),
+        )
+
+    def to_facts_dict(self) -> dict[str, Any]:
+        return {path: state.to_dict() for path, state in sorted(self._facts.items())}
 
     def field_paths(self) -> list[str]:
         return sorted(self._fields)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from qrest_agent.core.canonicalize import metadata_string_errors
 from qrest_agent.core.models import ValidationIssue, ValidationReport
 from qrest_agent.core.metadata_policy import channel_key_importance, channel_policy_keys, field_policy, is_blank
 from qrest_agent.core.path import get_path
@@ -132,6 +133,14 @@ def _validate_schema(metadata: dict[str, Any], issues: list[ValidationIssue]) ->
         if not result.valid:
             for error in result.errors:
                 issues.append(ValidationIssue("error", path, error))
+
+    # 方案 §4：正式 Metadata 字符串必须 ASCII 且受控字段使用标准值
+    for error in metadata_string_errors(metadata):
+        issues.append(ValidationIssue("error", _error_path(error), error))
+
+
+def _error_path(message: str) -> str:
+    return message.split(":", 1)[0]
 
 
 def _dedupe_issues(issues: list[ValidationIssue]) -> list[ValidationIssue]:

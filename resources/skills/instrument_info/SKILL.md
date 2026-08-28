@@ -24,9 +24,10 @@ description: 监测设备、通道和传感器信息
 
 - ChannelNum = len(Channels)（derive_counts）；
 - 通道编号重排：按楼层/位置顺序从 1 连续编号；
-- 已知监测楼层、每层测点数与平面尺寸时的布置生成（derive_channel_layout）：
-  仅当资料明确给出每层测点数（当前支持每层 3 个：左右 + 中部）与楼层列表时使用；
-  该布局约定（x_edge、y 线、Azimuth）是确定性约定，必须在证据中记录。
+- 完整通道表 → table_reader / 逐行提取 Channels 数组（最可靠路径）。
+- 注意：当前没有注册的通道布置模板 Tool（derive_channel_layout 已移除）。
+  只有资料明确给出完整逐通道配置（位置/方向/量程）时才能生成 Channels；
+  仅有“每层几个传感器”这类模糊描述时，Channels 保持 missing 并询问实际布置。
 
 ## 必须询问，禁止猜测
 

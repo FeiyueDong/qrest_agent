@@ -11,6 +11,7 @@ from qrest_agent.core.metadata_policy import (
     field_policies_by_path,
     is_blank,
 )
+from qrest_agent.core.canonicalize import metadata_string_errors
 from qrest_agent.core.models import ValidationReport
 from qrest_agent.core.path import get_path, set_path
 from qrest_agent.core.schema import DEFAULT_METADATA, QREST_REQUIRED_PATHS
@@ -99,6 +100,9 @@ def prepare_metadata_export(state: Any, include_reserved_analysis: bool = True) 
         result = validate_shape(path, value)
         if not result.valid:
             final_schema_errors.append((path, "; ".join(result.errors)))
+    # 方案 §4：ASCII 与受控值检查（确定性；ensure_ascii=True 不能代替语义规范化）
+    for error in metadata_string_errors(metadata):
+        final_schema_errors.append((error.split(":", 1)[0], error))
     if final_schema_errors:
         blocked = list(dict.fromkeys([path for path, _ in final_schema_errors] + blocked))
         return MetadataExportResult(
