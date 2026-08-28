@@ -39,7 +39,15 @@
     → 应答（含工具计算结果与 Skill 参考）；
   - 对话层同步展示工具结果与 Skill 指导；
   - 待办：`ChatSession` 的任务路由（TaskCoordinator）随 facade 移除时并入主 Agent。
-- [ ] **Phase 7：验证机制**（evidence validation / conflict validation 全面接入导出策略）
+- [x] **Phase 7：验证机制**
+  - Schema / required / consistency 校验保留并强化（冲突 issue 记录备选值数量）；
+  - 新增 **Evidence validation**：状态合格但无证据的关键字段记为 error，
+    进入 `report.evidence_gaps` 并阻断导出；
+  - **Conflict validation**：不同来源矛盾时 status=conflict + error issue，
+    必须由用户确认后才能导出；
+  - 导出报告新增 `field_annotations`：blocked / defaulted / blank / evidenced，
+    明确区分“缺失”与“默认值”，三档导出策略标注更清晰；
+  - 方案 §14 的 7 项验收测试已落地为 `tests/test_acceptance.py`。
 
 ## 过渡说明
 

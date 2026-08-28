@@ -26,6 +26,8 @@ class MetadataExportResult:
     blank_fields: list[str] = field(default_factory=list)
     blocked_fields: list[str] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
+    #: 每个受管字段的处理标注：blocked / defaulted / blank / evidenced
+    field_annotations: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self, include_metadata: bool = False) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -35,6 +37,7 @@ class MetadataExportResult:
             "blank_fields": self.blank_fields,
             "blocked_fields": self.blocked_fields,
             "messages": self.messages,
+            "field_annotations": dict(self.field_annotations),
         }
         if include_metadata:
             payload["metadata"] = self.metadata
@@ -43,7 +46,7 @@ class MetadataExportResult:
 
 def prepare_metadata_export(state: MetadataState, include_reserved_analysis: bool = True) -> MetadataExportResult:
     report = validate_state(state)
-    blocked = list(report.missing_required) + list(report.conflicts)
+    blocked = list(report.missing_required) + list(report.conflicts) + list(report.evidence_gaps)
     blocked.extend(issue.field_path for issue in report.issues if issue.level == "error" and issue.field_path not in blocked)
     if blocked:
         return MetadataExportResult(
@@ -51,6 +54,7 @@ def prepare_metadata_export(state: MetadataState, include_reserved_analysis: boo
             metadata=None,
             report=report,
             blocked_fields=blocked,
+            field_annotations={path: "blocked" for path in blocked},
             messages=["存在必须字段缺失、冲突或错误字段，未生成 metadata.json。"],
         )
 
@@ -70,6 +74,15 @@ def prepare_metadata_export(state: MetadataState, include_reserved_analysis: boo
 
     _apply_channel_field_policy(metadata, defaulted, blanked)
 
+    annotations: dict[str, str] = {}
+    for path in defaulted:
+        annotations[path] = "defaulted"
+    for path in blanked:
+        annotations[path] = "blank"
+    for path, policy in field_policies_by_path().items():
+        if path not in annotations and not is_blank(get_path(metadata, path)):
+            annotations[path] = "evidenced"
+
     messages: list[str] = []
     if defaulted:
         messages.append(f"{len(defaulted)} 个重要字段缺失，已写入默认值。")
@@ -83,6 +96,7 @@ def prepare_metadata_export(state: MetadataState, include_reserved_analysis: boo
         report=report,
         defaulted_fields=defaulted,
         blank_fields=blanked,
+        field_annotations=annotations,
         messages=messages,
     )
 

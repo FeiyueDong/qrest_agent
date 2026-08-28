@@ -7,6 +7,7 @@ from qrest_agent.core.metadata_policy import channel_key_importance, channel_pol
 from qrest_agent.core.path import get_path
 from qrest_agent.core.schema import QREST_REQUIRED_PATHS
 from qrest_agent.core.state import MetadataState
+from qrest_agent.state.working_state import EXPORTABLE_STATUSES
 
 
 def validate_state(state: MetadataState) -> ValidationReport:
@@ -22,7 +23,13 @@ def validate_state(state: MetadataState) -> ValidationReport:
         value = get_path(metadata, path)
         if record is not None and record.status == "conflict":
             conflicts.append(path)
-            issues.append(ValidationIssue("error", path, "field has conflicting candidate values"))
+            alternative_count = len(record.alternatives)
+            message = (
+                f"field has conflicting candidate values ({alternative_count} alternatives)"
+                if alternative_count
+                else "field has conflicting candidate values"
+            )
+            issues.append(ValidationIssue("error", path, message))
         elif is_blank(value):
             _append_missing_field(
                 path,
@@ -37,6 +44,7 @@ def validate_state(state: MetadataState) -> ValidationReport:
     _validate_building(metadata, issues)
     _validate_instrument(metadata, issues, missing_required, missing_important, missing_optional)
     _validate_data_info(metadata, issues)
+    evidence_gaps = _validate_evidence(state, issues)
 
     ready = not missing_required and not conflicts and not any(issue.level == "error" for issue in issues)
     return ValidationReport(
@@ -45,8 +53,27 @@ def validate_state(state: MetadataState) -> ValidationReport:
         missing_important=missing_important,
         missing_optional=missing_optional,
         conflicts=conflicts,
+        evidence_gaps=evidence_gaps,
         issues=issues,
     )
+
+
+def _validate_evidence(state: Any, issues: list[ValidationIssue]) -> list[str]:
+    """Evidence validation（方案 §7/§8）：状态合格但缺少证据的关键字段不得进入最终数据。
+
+    只检查 tracked required paths；证据由 Working State 的 FieldState.evidence 提供。
+    """
+    gaps: list[str] = []
+    for path in QREST_REQUIRED_PATHS:
+        record = state.records.get(path)
+        if record is None:
+            continue
+        if record.value is not None and record.status in EXPORTABLE_STATUSES and not record.evidence:
+            gaps.append(path)
+            issues.append(
+                ValidationIssue("error", path, "field has no evidence; evidence is required for final export")
+            )
+    return gaps
 
 
 def validate_metadata(metadata: dict[str, Any]) -> ValidationReport:

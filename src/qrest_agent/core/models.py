@@ -69,6 +69,7 @@ class ValidationReport:
     missing_important: list[str] = field(default_factory=list)
     missing_optional: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
+    evidence_gaps: list[str] = field(default_factory=list)
     issues: list[ValidationIssue] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -79,5 +80,6 @@ class ValidationReport:
             "missing_optional": self.missing_optional,
             "missing_fields": self.missing_required + self.missing_important + self.missing_optional,
             "conflicts": self.conflicts,
+            "evidence_gaps": list(self.evidence_gaps),
             "issues": [item.to_dict() for item in self.issues],
         }
