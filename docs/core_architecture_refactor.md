@@ -30,8 +30,16 @@
   选择 / Skill 改变行为 / 无正则提取 / 无证据拒绝 / 伪造证据降级 / 缺信息不生成 /
   真 derived / 假设不 derived / 自然回复 / 用户修正 / qREST 生成）。
 
-## 后续可选
+## 后续补充（§17/§20/§21）
 
-- ToolSpec 增加真正的参数 Schema（§21，当前仍为文字描述）；
-- 对话历史升级为 summary + recent turns（§17，当前仅保存最近 8 轮）；
-- System Prompt 进一步精简（§20）。
+- [x] **§21 Tool 参数 Schema**：ToolSpec.arguments 为机器可读 Schema
+  （type/required/minimum/description）；ToolRegistry.execute 先校验参数
+  （缺失/类型/范围），错误结构化返回；path 类型接受 PathLike；LLM 规划
+  上下文携带 tool_schemas。
+- [x] **§17 对话历史**：QrestAgent 维护结构化对话记忆（user/intent/new_facts/
+  response 摘要，最近 8 轮），注入每轮规划上下文；工程事实始终以 Working State 为准。
+- [x] **§20 System Prompt**：无字段知识（已在 Skill），仅保留角色/能力/边界/状态语义。
+- 真实 LLM 端到端演练：本开发环境无 ollama，使用 ScriptedClient 完成了
+  §28 交互模式的 mock 验证（资料 → 选择 building_info+instrument_info →
+  证据化提取 → 缺 NorthAngle 自然询问）；真实模型演练请在部署环境执行
+  `qrest_agent.cli chat`（默认 ollama-cli + qwen3:4b-instruct）。

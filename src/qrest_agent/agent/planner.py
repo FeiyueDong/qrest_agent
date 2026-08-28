@@ -260,7 +260,7 @@ def _action_planning_messages(
         "intent": intent,
         "current_state": _compact_state(context),
         "selected_skills": skill_texts,
-        "available_tools": context.get("tool_names", []),
+        "available_tools": context.get("tool_schemas") or context.get("tool_names", []),
     }
     return [
         {"role": "system", "content": AGENT_ACTION_PROMPT},

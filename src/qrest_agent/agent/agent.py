@@ -97,7 +97,8 @@ class QrestAgent:
         self.extractor = LLMExtractor(llm_client) if llm_client is not None else RuleBasedExtractor()
         self.planner = AgentPlanner(skill_registry=self.skills, tool_registry=self.tools)
         self.responder = Responder(llm_client)
-        self._recent_turns: list[dict[str, str]] = []
+        # 对话记忆（设计文档 §17）：结构化摘要，工程事实以 Working State 为准
+        self._conversation: list[dict[str, Any]] = []
 
     @property
     def system_prompt(self) -> str:
@@ -126,8 +127,9 @@ class QrestAgent:
             "missing_required": report.missing_required,
             "missing_important": report.missing_important,
             "conflicts": report.conflicts,
-            "recent_turns": list(self._recent_turns),
+            "recent_turns": list(self._conversation),
             "tool_names": [spec.name for spec in self.tools.list_specs()],
+            "tool_schemas": [spec.to_dict() for spec in self.tools.list_specs()],
             "skill_names": self.skills.list_names(),
         }
 
@@ -190,9 +192,16 @@ class QrestAgent:
         trusted = self.build_trusted_context(text or "", candidates, report, action_results, derivation_results, plan)
         response = self.responder.respond(trusted)
 
-        # 11. persist recent turns
-        self._recent_turns.append({"user": text or "", "assistant": response})
-        self._recent_turns = self._recent_turns[-8:]
+        # 11. persist conversation memory（摘要形式：意图 + 新事实 + 回复截断）
+        self._conversation.append(
+            {
+                "user": (text or "")[:200],
+                "intent": plan.intent,
+                "new_facts": [fact for fact in trusted.get("new_facts", [])][:5],
+                "response": response[:200],
+            }
+        )
+        self._conversation = self._conversation[-8:]
 
         decision = self.decide(report)
         tool_results = list(derivation_results)

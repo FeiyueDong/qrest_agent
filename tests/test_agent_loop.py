@@ -208,3 +208,21 @@ def test_llm_candidate_with_unverifiable_evidence_downgraded_to_uncertain() -> N
     assert record.status == "uncertain"
     assert "StructuralType" not in agent.to_metadata().get("BuildingInfo", {})
     assert len(result.candidates) == 1
+
+
+def test_conversation_memory_keeps_structured_summary() -> None:
+    """设计文档 §17：对话记忆以结构化摘要保存（意图 + 新事实 + 回复）。"""
+    agent = QrestAgent()
+    agent.run_turn("项目名称为 DemoBuilding。")
+    context = agent.build_turn_context("采样间隔为 0.02s。", [])
+
+    assert len(context["recent_turns"]) == 1
+    first = context["recent_turns"][0]
+    assert first["user"] == "项目名称为 DemoBuilding。"
+    assert first["intent"] == "collect_metadata"
+    assert any("BuildingInfo.ProjectName" in fact for fact in first["new_facts"])
+    assert first["response"]
+
+    # 第二轮的规划上下文携带前轮摘要（而不是丢弃历史）
+    plan = agent.planner.plan("采样间隔为 0.02s。", context, None)
+    assert plan.intent == "collect_metadata"
