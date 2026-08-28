@@ -1,9 +1,23 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
-from qrest_agent.agent.task_models import TaskIntent
+
+@dataclass(frozen=True, slots=True)
+class TaskIntent:
+    """规则兜底意图解析的输出（仅用于 LLM 不可用时的 fallback 路径）。"""
+
+    name: str
+    skill_name: str
+    mode: str
+    metadata_json: str | None = None
+    data_txt: str | None = None
+    output_qrest: str | None = None
+    input_qrest: str | None = None
+    compare_metadata_json: str | None = None
+    strict: bool = False
 
 
 def detect_task_intent(text: str) -> TaskIntent | None:

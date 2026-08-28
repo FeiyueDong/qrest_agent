@@ -89,7 +89,7 @@ def test_load_benchmark_cases_resource(artifact_dir: Path) -> None:
     assert {case.case_id for case in cases} >= {
         "simple_explicit_metadata",
         "missing_sampling_interval",
-        "kunming_document_excerpt",
+        "explicit_chinese_metadata",
     }
 
 

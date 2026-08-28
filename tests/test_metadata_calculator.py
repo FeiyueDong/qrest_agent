@@ -130,16 +130,6 @@ def test_calculation_tools_are_registered_and_executable(tmp_path: Path) -> None
             "basement_first_height": 2.6,
         },
     )
-    layout = registry.execute(
-        "derive_channel_layout",
-        {
-            "profile": profile["profile"],
-            "monitored_floors": ["B1F", 1, 3, 6, 9, 13],
-            "length": 42.0,
-            "width": 25.2,
-            "device_type": "941B",
-        },
-    )
     counts = registry.execute("derive_counts", {"elevations": [0.0, 4.5], "channels": [{}, {}]})
 
     write_json(
@@ -149,7 +139,6 @@ def test_calculation_tools_are_registered_and_executable(tmp_path: Path) -> None
             "box": box,
             "azimuth": azimuth,
             "profile": profile,
-            "layout_head": layout["channels"][:2],
             "counts": counts,
         },
     )
@@ -158,7 +147,6 @@ def test_calculation_tools_are_registered_and_executable(tmp_path: Path) -> None
     assert box["bounding_box"]["MaxX"] == 21.0
     assert azimuth["azimuth"] == 90.0
     assert profile["elevation_num"] == 16
-    assert len(layout["channels"]) == 18
     assert counts == {"ElevationNum": 2, "ChannelNum": 2}
 
 
@@ -217,6 +205,7 @@ def test_knowledge_skills_are_discoverable_and_authoritative(artifact_dir: Path)
         "data_info",
         "instrument_info",
         "metadata",
+        "qrest_data",
         "qrest_data_generation",
         "qrest_data_loading",
         "sensor_layout",
@@ -225,6 +214,6 @@ def test_knowledge_skills_are_discoverable_and_authoritative(artifact_dir: Path)
     assert "ElevationNum = len(Elevation)" in skills["building_info"].instructions
     assert "ChannelNum = len(Channels)" in skills["instrument_info"].instructions
     assert "Frequency = 1 / DT" in skills["data_info"].instructions
-    assert "derive_channel_layout" in skills["sensor_layout"].instructions
+    assert "模板" in skills["sensor_layout"].instructions
     for skill in skills.values():
         assert "禁止" in skill.instructions

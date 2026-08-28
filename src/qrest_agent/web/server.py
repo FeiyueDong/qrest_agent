@@ -670,7 +670,7 @@ INDEX_HTML = r"""<!doctype html>
           <h2>Skills</h2>
           <span class="muted" id="skillCount"></span>
         </div>
-        <div class="muted">自然语言任务会优先由 skill handler 处理。</div>
+        <div class="muted">自然语言任务由主 Agent 自主处理（选择 Skill、调用 Tool）。</div>
         <div class="skill-list" id="skillList"></div>
         <div class="muted" style="margin-top: 10px;">Task logs</div>
         <div class="task-log-list" id="taskLogList"></div>

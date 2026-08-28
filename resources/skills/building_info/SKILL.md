@@ -1,3 +1,8 @@
+---
+name: building_info
+description: 建筑位置、结构类型、尺寸、标高等工程信息
+---
+
 # BuildingInfo 专业知识 Skill
 
 建筑信息：监测对象的位置与几何参数。建筑施工完成后基本不变。

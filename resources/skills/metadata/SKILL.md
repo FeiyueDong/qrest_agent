@@ -1,3 +1,8 @@
+---
+name: metadata
+description: 元数据收集总则：字段资格、状态语义、证据要求与禁止行为
+---
+
 # qREST Metadata Acquisition Skill
 
 元数据收集总则：用于任何“把散落资料整理为 qREST 标准元数据”的工作。

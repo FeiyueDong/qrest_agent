@@ -1,3 +1,8 @@
+---
+name: sensor_layout
+description: 测点布置判断：监测楼层与每层测点数的布置原则
+---
+
 # SensorLayout 专业知识 Skill
 
 测点布置：把“监测楼层 + 每层测点数 + 平面尺寸”的描述转化为确定的通道布置。

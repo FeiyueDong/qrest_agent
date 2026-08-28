@@ -1,19 +1,13 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
 from qrest_agent.agent.extractor import LLMExtractor, RuleBasedExtractor
-from qrest_agent.agent.prompts import (
-    AGENT_PLANNING_PROMPT,
-    AGENT_SYSTEM_PROMPT,
-    PLANNING_SCHEMA_HINT,
-)
-from qrest_agent.agent.task_handlers import TaskHandlerRegistry, create_default_handler_registry
-from qrest_agent.agent.task_models import TaskIntent
-from qrest_agent.agent.tasks import detect_task_intent, intent_from_arguments, intent_to_arguments
+from qrest_agent.agent.planner import ActionSpec, AgentPlanner, TurnPlan
+from qrest_agent.agent.prompts import AGENT_SYSTEM_PROMPT
+from qrest_agent.agent.responder import Responder
 from qrest_agent.agent.tool_registry import ToolRegistry
 from qrest_agent.core.exporter import MetadataExportResult, prepare_metadata_export as _prepare_metadata_export
 from qrest_agent.core.models import Candidate, ValidationReport
@@ -25,57 +19,19 @@ from qrest_agent.skills import SkillRegistry
 from qrest_agent.state.evidence import Evidence
 from qrest_agent.state.working_state import EXPORTABLE_STATUSES, WorkingState
 
-AgentAction = Literal["resolve_conflicts", "ask_missing", "review_warnings", "ready", "task_done"]
-PlanAction = Literal["extract", "tool", "ask", "export", "none", "task"]
-
-#: 字段路径前缀 → 专业知识 Skill 名（Phase 6：决策前读取相关 Skill）。
-_SKILL_BY_PREFIX: tuple[tuple[str, str], ...] = (
-    ("BuildingInfo.", "building_info"),
-    ("InstrumentInfo.", "instrument_info"),
-    ("DataInfo.", "data_info"),
-)
+AgentAction = Literal["resolve_conflicts", "ask_missing", "review_warnings", "ready"]
 
 
 @dataclass(slots=True)
 class AgentDecision:
-    """主 Agent 对当前状态的下一步决策（含 Skill 指导）。"""
+    """确定性决策摘要（审计用）；正式回复由 Responder 生成。"""
 
     action: AgentAction
     reason: str
     details: list[str] = field(default_factory=list)
-    guidance: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "action": self.action,
-            "reason": self.reason,
-            "details": list(self.details),
-            "guidance": list(self.guidance),
-        }
-
-
-@dataclass(slots=True)
-class AgentPlan:
-    """主 Agent 的回合计划（Phase 6：LLM 规划，规则兜底）。"""
-
-    action: PlanAction = "extract"
-    tool_name: str | None = None
-    tool_arguments: dict[str, Any] = field(default_factory=dict)
-    skills: list[str] = field(default_factory=list)
-    skill_name: str | None = None
-    reason: str = ""
-    source: str = "rule"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "action": self.action,
-            "tool_name": self.tool_name,
-            "tool_arguments": self.tool_arguments,
-            "skills": list(self.skills),
-            "skill_name": self.skill_name,
-            "reason": self.reason,
-            "source": self.source,
-        }
+        return {"action": self.action, "reason": self.reason, "details": list(self.details)}
 
 
 @dataclass(slots=True)
@@ -84,11 +40,11 @@ class TurnResult:
     report: ValidationReport
     response: str
     decision: AgentDecision
+    plan: TurnPlan | None = None
     extractor: str = "unknown"
     fallback_reason: str | None = None
     tool_results: list[dict[str, Any]] = field(default_factory=list)
-    plan: AgentPlan | None = None
-    task_result: dict[str, Any] | None = None
+    action_results: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,28 +52,31 @@ class TurnResult:
             "report": self.report.to_dict(),
             "response": self.response,
             "decision": self.decision.to_dict(),
+            "plan": self.plan.to_dict() if self.plan is not None else None,
             "extractor": self.extractor,
             "fallback_reason": self.fallback_reason,
             "tool_results": list(self.tool_results),
-            "plan": self.plan.to_dict() if self.plan is not None else None,
-            "task_result": self.task_result,
+            "action_results": dict(self.action_results),
         }
 
 
 class QrestAgent:
-    """Phase 1-6 主 Agent：系统的决策主体。
+    """主 Agent（设计文档 §6/§22）：LLM 决策 → 确定性执行 → LLM 回复。
 
-    回合循环（Phase 6）：
-    1. 理解：接收消息/文件，可选 LLM 规划（plan）；
-    2. 执行：按计划调用 Tool（如 read_document），提取候选事实；
-    3. 更新：所有候选先进入 Working State（submit_all）；
-    4. 推导：自动调用确定性计算 Tool 补齐可推导字段（derive_counts /
-       calculate_frequency），以 derived + 证据落库；
-    5. 校验：确定性 Validator 生成报告；
-    6. 决策：读取相关专业知识 Skill，输出 AgentDecision
-       （继续处理 / 询问用户 / 可导出）。
+    回合循环（run_turn）：
+      1. ingest input
+      2. build context
+      3. LLM intent + skill selection（无 LLM 时规则兜底）
+      4. load selected Skills（完整 SKILL.md 注入决策上下文）
+      5. LLM action planning
+      6. execute actions（extract / tool / ask / respond / export）
+      7. deterministic derivations
+      8. validate Working State
+      9. determine trusted turn context
+     10. LLM response（Responder，只读）
+     11. persist session（recent turns）
 
-    程序不预先规定用户的信息输入顺序；每一步都由当前 Working State 驱动。
+    Python 只负责安全边界与确定性执行，不模拟智能行为。
     """
 
     def __init__(
@@ -132,23 +91,17 @@ class QrestAgent:
         self.tools = tool_registry or ToolRegistry()
         self.skills = skill_registry or SkillRegistry()
         self.session_id = session_id
-        self._handler_registry: TaskHandlerRegistry | None = None
         self.working_state = working_state or WorkingState.empty()
         self.working_state.tracked_paths = list(QREST_TRACKED_PATHS)
         self.sources = SourceManager()
         self.extractor = LLMExtractor(llm_client) if llm_client is not None else RuleBasedExtractor()
-        self._skill_text_cache: dict[str, str] = {}
+        self.planner = AgentPlanner(skill_registry=self.skills, tool_registry=self.tools)
+        self.responder = Responder(llm_client)
+        self._recent_turns: list[dict[str, str]] = []
 
     @property
     def system_prompt(self) -> str:
         return AGENT_SYSTEM_PROMPT
-
-    @property
-    def handlers(self) -> TaskHandlerRegistry:
-        """qREST 数据生成/加载 skill handlers（主 Agent 计划执行的确定性工作流）。"""
-        if self._handler_registry is None:
-            self._handler_registry = create_default_handler_registry(self, self.session_id or "default")
-        return self._handler_registry
 
     # ---- 理解 ----
 
@@ -158,132 +111,207 @@ class QrestAgent:
     def ingest_file(self, path: str | Path) -> list[SourceChunk]:
         return self.sources.add_file(path)
 
-    # ---- 规划与执行（Phase 6） ----
+    # ---- 上下文 ----
 
-    def plan(self, text: str) -> AgentPlan:
-        """生成回合计划：LLM 可用时由模型决策，否则规则兜底为 extract。"""
-        if self.llm_client is None:
-            return _rule_plan(text)
-        try:
-            parsed = self.llm_client.complete_json(
-                _build_planning_messages(text, self),
-                schema_hint=PLANNING_SCHEMA_HINT,
-            )
-        except Exception:
-            return AgentPlan(action="extract", reason="LLM planning failed; rule fallback", source="rule")
-        return _plan_from_model(parsed, self.tools)
-
-    def execute_plan(self, plan: AgentPlan) -> dict[str, Any]:
-        if plan.action != "tool" or not plan.tool_name:
-            return {"action": plan.action, "executed": False}
-        try:
-            output = self.tools.execute(plan.tool_name, dict(plan.tool_arguments))
-        except Exception as exc:
-            return {"action": "tool", "tool": plan.tool_name, "ok": False, "error": str(exc)}
-        return {"action": "tool", "tool": plan.tool_name, "ok": True, "output": output}
-
-    def context_summary(self) -> dict[str, Any]:
+    def build_turn_context(self, text: str, chunks: list[SourceChunk]) -> dict[str, Any]:
         report = validate_state(self.working_state)
         known: dict[str, dict[str, Any]] = {}
         for path, state in self.working_state.fields.items():
             if state.value is not None and state.status in EXPORTABLE_STATUSES:
                 known[path] = {"value": state.value, "status": state.status, "confidence": state.confidence}
         return {
+            "user_message": text,
+            "session_id": self.session_id,
             "known_fields": known,
             "missing_required": report.missing_required,
             "missing_important": report.missing_important,
             "conflicts": report.conflicts,
-            "skills": self.skills.list_names(),
-            "tools": [spec.name for spec in self.tools.list_specs()],
+            "recent_turns": list(self._recent_turns),
+            "tool_names": [spec.name for spec in self.tools.list_specs()],
+            "skill_names": self.skills.list_names(),
+        }
+
+    def build_trusted_context(
+        self,
+        text: str,
+        candidates: list[Candidate],
+        report: ValidationReport,
+        action_results: dict[str, Any],
+        derivation_results: list[dict[str, Any]],
+        plan: TurnPlan,
+    ) -> dict[str, Any]:
+        new_facts = [
+            f"{candidate.field_path} = {candidate.value}（{candidate.status}）"
+            for candidate in candidates
+            if candidate.value is not None
+        ]
+        return {
+            "user_message": text,
+            "intent": plan.intent,
+            "plan_reason": plan.reason,
+            "new_facts": new_facts,
+            "missing_required": report.missing_required,
+            "missing_important": report.missing_important,
+            "conflicts": report.conflicts,
+            "known_fields": {
+                path: {"value": state.value, "status": state.status}
+                for path, state in self.working_state.fields.items()
+                if state.value is not None
+            },
+            "action_results": action_results,
+            "derivation_results": derivation_results,
+            "report_ready": report.ready,
         }
 
     # ---- 回合循环 ----
 
     def run_turn(self, text: str | None = None, files: list[str | Path] | None = None) -> TurnResult:
+        # 1. ingest
         chunks: list[SourceChunk] = []
         if text:
             chunks.extend(self.ingest_text(text))
         for path in files or []:
             chunks.extend(self.ingest_file(path))
 
-        plan = self.plan(text or "")
-        if plan.action == "task":
-            return self._run_task(text or "", plan)
-        tool_results: list[dict[str, Any]] = []
-        if plan.action == "tool" and plan.tool_name:
-            plan_result = self.execute_plan(plan)
-            tool_results.append(plan_result)
-            if plan_result.get("ok") and plan.tool_name == "read_document":
-                for item in (plan_result.get("output") or {}).get("chunks", []):
-                    if isinstance(item, dict):
-                        chunk = SourceChunk.from_dict(item)
-                        if chunk.text.strip():
-                            chunks.append(chunk)
+        # 2-5. context + plan（intent/skills/actions）
+        context = self.build_turn_context(text or "", chunks)
+        plan = self.planner.plan(text or "", context, self.llm_client)
 
-        candidates, extractor_name, fallback_reason = self._extract(chunks)
-        self.working_state.submit_all(candidates)
-        tool_results.extend(self._apply_derivation_tools())
+        # 6. execute actions
+        candidates, action_results, extractor_name, fallback_reason = self._execute_actions(plan, chunks, text or "")
 
+        # 7. deterministic derivations
+        derivation_results = self._apply_derivation_tools()
+
+        # 8. validate
         report = validate_state(self.working_state)
+
+        # 9-10. trusted context + LLM response
+        trusted = self.build_trusted_context(text or "", candidates, report, action_results, derivation_results, plan)
+        response = self.responder.respond(trusted)
+
+        # 11. persist recent turns
+        self._recent_turns.append({"user": text or "", "assistant": response})
+        self._recent_turns = self._recent_turns[-8:]
+
         decision = self.decide(report)
+        tool_results = list(derivation_results)
+        for name, payload in action_results.items():
+            if name.startswith("tool:"):
+                tool_results.append({"tool": name.removeprefix("tool:"), "output": payload})
         return TurnResult(
             candidates=candidates,
             report=report,
-            response=build_agent_response(report, decision, tool_results=tool_results),
+            response=response,
             decision=decision,
+            plan=plan,
             extractor=extractor_name,
             fallback_reason=fallback_reason,
             tool_results=tool_results,
-            plan=plan,
+            action_results=action_results,
         )
+
+    # ---- actions 执行器 ----
+
+    def _execute_actions(
+        self,
+        plan: TurnPlan,
+        chunks: list[SourceChunk],
+        text: str,
+    ) -> tuple[list[Candidate], dict[str, Any], str, str | None]:
+        pending = list(chunks)
+        candidates: list[Candidate] = []
+        action_results: dict[str, Any] = {}
+        extractor_name = "unknown"
+        fallback_reason: str | None = None
+
+        for action in plan.actions:
+            if action.type == "extract":
+                files = [
+                    self._resolve_placeholder(value, action_results)
+                    for value in action.arguments.get("files") or []
+                ]
+                for file_path in files:
+                    if isinstance(file_path, str) and file_path:
+                        try:
+                            pending.extend(self.ingest_file(file_path))
+                        except Exception as exc:
+                            action_results.setdefault("extract_errors", []).append(str(exc))
+                if not pending:
+                    continue
+                turn_candidates, extractor_name, fallback_reason = self._extract(pending)
+                candidates.extend(turn_candidates)
+                # 所有提取结果先进入 Working State（设计文档 §3.5：唯一事实中心）
+                self.working_state.submit_all(turn_candidates)
+                pending = []
+            elif action.type == "tool":
+                tool_name = action.tool
+                if tool_name is None:
+                    continue
+                arguments = self._resolve_placeholders(action.arguments, action_results)
+                try:
+                    result = self.tools.execute(tool_name, arguments)
+                    payload = result.to_dict() if hasattr(result, "to_dict") else result
+                except Exception as exc:
+                    payload = {"ok": False, "error": str(exc)}
+                action_results[f"tool:{tool_name}"] = payload
+                if tool_name == "read_document" and isinstance(payload, dict) and payload.get("chunks"):
+                    for item in payload["chunks"]:
+                        if isinstance(item, dict):
+                            chunk = SourceChunk.from_dict(item)
+                            if chunk.text.strip():
+                                pending.append(chunk)
+            elif action.type == "export":
+                export = self.prepare_metadata_export()
+                payload = export.to_dict(include_metadata=True)
+                session_dir = self.session_id or "default"
+                self.tools.artifacts.write_json(
+                    session_dir, "metadata_export_report.json", export.to_dict(include_metadata=False)
+                )
+                if export.ok and export.metadata is not None:
+                    path = self.tools.artifacts.write_json(session_dir, "metadata.json", export.metadata)
+                    payload["metadata_json"] = str(path)
+                action_results["export"] = payload
+            elif action.type in {"ask", "respond"}:
+                break
+        return candidates, action_results, extractor_name, fallback_reason
+
+    def _resolve_placeholders(self, value: Any, action_results: dict[str, Any]) -> Any:
+        if isinstance(value, str):
+            return self._resolve_placeholder(value, action_results)
+        if isinstance(value, dict):
+            return {key: self._resolve_placeholders(item, action_results) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._resolve_placeholders(item, action_results) for item in value]
+        return value
+
+    def _resolve_placeholder(self, value: str, action_results: dict[str, Any]) -> Any:
+        """$export.key / $tool:<name>.key / $tool:<name>.outputs.key 占位符解析。"""
+        if not value.startswith("$"):
+            return value
+        parts = value[1:].split(".", 1)
+        if len(parts) != 2:
+            return value
+        namespace, key = parts
+        source = action_results.get(namespace)
+        if source is None or not isinstance(source, dict):
+            return value
+        if key in source:
+            return source[key]
+        if "outputs" in source and isinstance(source["outputs"], dict) and key in source["outputs"]:
+            return source["outputs"][key]
+        return value
 
     def decide(self, report: ValidationReport) -> AgentDecision:
         if report.conflicts:
-            decision = AgentDecision(
-                "resolve_conflicts",
-                "存在冲突字段，需要用户确认采用哪个值",
-                list(report.conflicts),
-            )
-        elif report.missing_required:
-            decision = AgentDecision(
-                "ask_missing",
-                "必要字段缺失，需要用户补充证据",
-                list(report.missing_required),
-            )
-        elif report.missing_important:
-            decision = AgentDecision(
-                "review_warnings",
-                "重要字段缺失，导出时将使用默认值并明确标注",
-                list(report.missing_important),
-            )
-        else:
-            decision = AgentDecision("ready", "工作状态满足校验，可以进入导出或后续算法配置", [])
-        decision.guidance = self._skill_guidance(decision)
-        return decision
+            return AgentDecision("resolve_conflicts", "存在冲突字段，需要用户确认", list(report.conflicts))
+        if report.missing_required:
+            return AgentDecision("ask_missing", "必要字段缺失，需要用户补充证据", list(report.missing_required))
+        if report.missing_important:
+            return AgentDecision("review_warnings", "重要字段缺失，导出时将使用默认值", list(report.missing_important))
+        return AgentDecision("ready", "工作状态满足校验", [])
 
-    def _run_task(self, text: str, plan: AgentPlan) -> TurnResult:
-        intent = intent_from_arguments(plan.skill_name or "", plan.tool_arguments)
-        handler = self.handlers.get(plan.skill_name or "") if intent is not None else None
-        if handler is None or intent is None:
-            return TurnResult(
-                candidates=[],
-                report=validate_state(self.working_state),
-                response="任务无法执行：skill 或参数无效，请重试。",
-                decision=AgentDecision("ready", "invalid task plan", []),
-                extractor="task",
-                plan=plan,
-                fallback_reason="invalid task plan",
-            )
-        result = handler.handle(text, intent)
-        return TurnResult(
-            candidates=[],
-            report=result.report,
-            response=result.response,
-            decision=AgentDecision("task_done", f"task {result.command} executed", []),
-            extractor="task",
-            plan=plan,
-            task_result=result.tool_result,
-        )
+    # ---- 导出 ----
 
     def can_export(self) -> bool:
         return validate_state(self.working_state).ready
@@ -326,10 +354,7 @@ class QrestAgent:
     # ---- 内部 ----
 
     def _apply_derivation_tools(self) -> list[dict[str, Any]]:
-        """回合内的确定性推导微循环：数组长度 → 计数；DT → Frequency（仅报告）。
-
-        推导结果以 derived + tool 证据写入 Working State（方案 §8.3）。
-        """
+        """回合内确定性推导（设计文档 §12.3/§11.3）：derived + tool 证据落库。"""
         results: list[dict[str, Any]] = []
         state = self.working_state
 
@@ -344,8 +369,13 @@ class QrestAgent:
                     "BuildingInfo.ElevationNum",
                     derived,
                     derived_from=["BuildingInfo.Elevation"],
-                    evidence=[Evidence(source_id="tool:derive_counts", source_type="tool",
-                                        text="ElevationNum = len(Elevation)")],
+                    evidence=[Evidence(
+                        source_id="tool:derive_counts",
+                        source_type="tool",
+                        tool="derive_counts",
+                        derived_from=["BuildingInfo.Elevation"],
+                        text="ElevationNum = len(Elevation)",
+                    )],
                     confidence=1.0,
                     updated_by="tool",
                 )
@@ -363,8 +393,13 @@ class QrestAgent:
                     "InstrumentInfo.ChannelNum",
                     derived,
                     derived_from=["InstrumentInfo.Channels"],
-                    evidence=[Evidence(source_id="tool:derive_counts", source_type="tool",
-                                        text="ChannelNum = len(Channels)")],
+                    evidence=[Evidence(
+                        source_id="tool:derive_counts",
+                        source_type="tool",
+                        tool="derive_counts",
+                        derived_from=["InstrumentInfo.Channels"],
+                        text="ChannelNum = len(Channels)",
+                    )],
                     confidence=1.0,
                     updated_by="tool",
                 )
@@ -378,180 +413,29 @@ class QrestAgent:
 
         return results
 
-    def _skill_guidance(self, decision: AgentDecision) -> list[str]:
-        """根据决策涉及的字段读取相关专业知识 Skill，返回简短指导。"""
-        skills: list[str] = []
-        for field_path in decision.details:
-            for prefix, skill_name in _SKILL_BY_PREFIX:
-                if field_path.startswith(prefix) and skill_name not in skills:
-                    skills.append(skill_name)
-                    break
-        if not skills:
-            return []
-
-        guidance: list[str] = []
-        for skill_name in skills:
-            try:
-                text = self._skill_text(skill_name)
-            except KeyError:
-                continue
-            excerpt = _extract_skill_guidance(text)
-            if excerpt:
-                guidance.append(f"{skill_name}: {excerpt}")
-        return guidance[:2]
-
-    def _skill_text(self, skill_name: str) -> str:
-        if skill_name not in self._skill_text_cache:
-            self._skill_text_cache[skill_name] = self.skills.load(skill_name).instructions
-        return self._skill_text_cache[skill_name]
-
     def _extract(self, chunks: list[SourceChunk]) -> tuple[list[Candidate], str, str | None]:
-        using_llm = isinstance(self.extractor, LLMExtractor)
-        fallback_reason: str | None = None
-        rule_extractor = RuleBasedExtractor()
-        if using_llm:
+        """正式路径 LLM-only；LLM 失败/无结果时规则兜底（设计文档 §9）。"""
+        if isinstance(self.extractor, LLMExtractor):
+            fallback_reason: str | None = None
             try:
                 llm_candidates = self.extractor.extract(chunks)
             except Exception as exc:
                 fallback_reason = f"LLM extraction failed: {exc}"
                 llm_candidates = []
-
-            rule_candidates = rule_extractor.extract(chunks)
             if llm_candidates:
-                candidates = llm_candidates + rule_candidates
-                extractor_name = "llm+rule" if rule_candidates else "llm"
-            else:
-                fallback_reason = fallback_reason or "LLM extraction returned no candidates"
-                candidates = rule_candidates
-                extractor_name = "rule"
-        else:
+                return llm_candidates, "llm", None
+            fallback_reason = fallback_reason or "LLM extraction returned no candidates"
             try:
-                candidates = rule_extractor.extract(chunks)
+                return RuleBasedExtractor().extract(chunks), "rule", fallback_reason
             except Exception as exc:
-                fallback_reason = f"rule extraction failed: {exc}"
-                candidates = []
-            extractor_name = "rule"
-        return candidates, extractor_name, fallback_reason
-
-
-def build_agent_response(
-    report: ValidationReport,
-    decision: AgentDecision,
-    tool_results: list[dict[str, Any]] | None = None,
-) -> str:
-    if decision.action == "resolve_conflicts":
-        lines = ["发现字段存在冲突，请确认：" + "，".join(report.conflicts)]
-    elif decision.action == "ask_missing":
-        lines = ["当前仍缺少必要信息：" + "，".join(report.missing_required)]
-    elif decision.action == "review_warnings":
-        lines = ["必须字段已满足，但仍缺少重要信息，导出时会使用默认值：" + "，".join(report.missing_important)]
-    else:
-        lines = []
-        if report.missing_optional:
-            lines.append("必须字段已满足，部分非关键字段缺失，导出时会留空。")
-        else:
-            lines.append("元数据已通过校验，可以导出 qREST metadata.json。")
-
-    for item in tool_results or []:
-        tool = item.get("tool")
-        if tool == "calculate_frequency":
-            lines.append(f"工具计算：Frequency = 1 / DT = {item.get('value')} Hz（来源 {item.get('from')}）")
-        elif tool == "derive_counts":
-            source = ", ".join(item.get("derived_from") or [])
-            lines.append(f"工具推导：{item.get('field_path')} = {item.get('value')}（derived_from {source}）")
-        elif item.get("ok") and tool == "read_document":
-            output = item.get("output") or {}
-            lines.append(f"工具读取：{output.get('path')}（{output.get('chunk_count', 0)} 个文本块）")
-
-    for entry in decision.guidance:
-        lines.append(f"参考 Skill {entry}")
-    return "\n".join(line for line in lines if line)
-
-
-def _rule_plan(text: str) -> AgentPlan:
-    """规则兜底规划：识别 qREST 数据加载/生成任务 → task；否则 extract。"""
-    intent = detect_task_intent(text)
-    if intent is not None:
-        return AgentPlan(
-            action="task",
-            skill_name=intent.skill_name,
-            tool_arguments=intent_to_arguments(intent),
-            skills=[intent.skill_name],
-            reason=f"detected task intent: {intent.name}",
-            source="rule",
-        )
-    return AgentPlan(action="extract", reason="rule provider default", source="rule")
+                return [], "rule", f"{fallback_reason}; rule fallback failed: {exc}"
+        try:
+            return RuleBasedExtractor().extract(chunks), "rule", None
+        except Exception as exc:
+            return [], "rule", f"rule extraction failed: {exc}"
 
 
 def _to_json(data: dict[str, Any]) -> str:
+    import json
+
     return json.dumps(data, ensure_ascii=False, indent=2)
-
-
-def _build_planning_messages(text: str, agent: QrestAgent) -> list[dict[str, str]]:
-    context = agent.context_summary()
-    return [
-        {"role": "system", "content": AGENT_PLANNING_PROMPT},
-        {
-            "role": "user",
-            "content": (
-                "Current context:\n"
-                + json.dumps(context, ensure_ascii=False, default=str)
-                + "\n\nUser message:\n"
-                + text
-                + "\n\nReturn the JSON plan."
-            ),
-        },
-    ]
-
-
-def _plan_from_model(parsed: dict[str, Any], tools: ToolRegistry) -> AgentPlan:
-    action = str(parsed.get("action", "none"))
-    if action not in {"extract", "tool", "ask", "export", "none"}:
-        action = "none"
-
-    tool_name = parsed.get("tool")
-    arguments = parsed.get("arguments")
-    if not isinstance(arguments, dict):
-        arguments = {}
-    skills = [str(item) for item in parsed.get("skills", []) if isinstance(item, str)]
-
-    skill_name: str | None = None
-    if action == "tool":
-        known = {spec.name for spec in tools.list_specs()}
-        if tool_name not in known:
-            action = "extract"
-            tool_name = None
-            arguments = {}
-    elif action == "task":
-        skill_name = parsed.get("skill") or parsed.get("skill_name")
-        if skill_name not in {"qrest_data_generation", "qrest_data_loading"}:
-            action = "extract"
-            skill_name = None
-            arguments = {}
-
-    return AgentPlan(
-        action=action,  # type: ignore[arg-type]
-        tool_name=tool_name,
-        tool_arguments=arguments,
-        skills=skills,
-        skill_name=skill_name,
-        reason=str(parsed.get("reason", "")),
-        source="llm",
-    )
-
-
-def _extract_skill_guidance(text: str, max_chars: int = 120) -> str:
-    marker = "## 必须询问"
-    start = text.find(marker)
-    if start == -1:
-        return ""
-    section = text[start:]
-    end = section.find("\n## ", len(marker))
-    if end != -1:
-        section = section[:end]
-    lines: list[str] = []
-    for line in section.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("- ") or stripped.startswith(("* ", "1. ", "2. ", "3. ", "4. ", "5. ", "6. ")):
-            lines.append(stripped.lstrip("- *").rstrip("；;").strip())
-    return "；".join(line for line in lines if line)[:max_chars]

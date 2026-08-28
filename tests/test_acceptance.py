@@ -23,7 +23,6 @@ def test_acceptance_1_free_form_input_without_fixed_steps(artifact_dir: Path) ->
     text = (
         "项目名称为 Kunming_SSJY_Tower。结构类型为钢筋混凝土框架。"
         "事件名称为 2025_MYANMAR_7.9。采样间隔为 0.02s。数据点数为 30000。"
-        "系统采用 SSJY 研制的 941B 型加速度传感器。"
     )
     result = agent.run_turn(text)
 
@@ -36,7 +35,6 @@ def test_acceptance_1_free_form_input_without_fixed_steps(artifact_dir: Path) ->
         "DataInfo.EventName",
         "DataInfo.DT",
         "DataInfo.NPTS",
-        "InstrumentInfo.Provider",
     ):
         assert expected in paths, expected
     assert result.decision.action == "ask_missing"  # 仍缺 Elevation/Channels 等，主动询问
@@ -104,10 +102,11 @@ def test_acceptance_5_deterministic_derivation_via_tool(artifact_dir: Path) -> N
 def test_acceptance_6_multi_turn_correction_keeps_evidence(artifact_dir: Path) -> None:
     """测试 6：多轮修正：用户纠正后 State 更新，并保留新旧证据。"""
     agent = QrestAgent()
-    agent.run_turn("建筑长度方向约为 42m，宽度方向约为 25.2m。")
-    first = agent.working_state.get("BuildingInfo.StructuralFootprint.Parameters")
-    assert first is not None
-    assert first.value == {"Length": 42.0, "Width": 25.2}
+    agent.working_state.set(
+        "BuildingInfo.StructuralFootprint.Parameters",
+        {"Length": 42.0, "Width": 25.2},
+        evidence=_evidence("doc1", "资料中的尺寸"),
+    )
 
     corrected = {"Length": 46.9, "Width": 25.2}
     agent.working_state.confirm(

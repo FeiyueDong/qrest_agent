@@ -1,3 +1,8 @@
+---
+name: instrument_info
+description: 监测设备、通道和传感器信息
+---
+
 # InstrumentInfo 专业知识 Skill
 
 监测设备信息：每个测量通道的测量参数与安装位置。布设完成后基本不变。

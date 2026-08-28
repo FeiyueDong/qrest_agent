@@ -84,17 +84,20 @@ def test_unknown_llm_field_path_falls_back_to_rule_based_extractor(artifact_dir:
     assert result.fallback_reason == "LLM extraction returned no candidates"
 
 
-def test_llm_extraction_is_supplemented_by_rule_based_extractor(artifact_dir: Path) -> None:
+def test_llm_extraction_is_not_parallel_with_rule_extractor(artifact_dir: Path) -> None:
+    # 设计文档 §9：正式路径 LLM-only；规则提取不并行参与
     agent = QrestAgent(llm_client=PartialLLMClient())
     result = agent.run_turn("项目名称为 DemoBuilding。事件名称为 LLM_EVENT。采样间隔为 0.02s。")
 
-    write_json(artifact_dir / "agent" / "partial_llm_with_rule_supplement_turn.json", result.to_dict())
+    write_json(artifact_dir / "agent" / "llm_only_turn.json", result.to_dict())
 
     candidate_paths = {item.field_path for item in result.candidates}
-    assert result.extractor == "llm+rule"
+    assert result.extractor == "llm"
+    assert result.fallback_reason is None
     assert "DataInfo.EventName" in candidate_paths
-    assert "BuildingInfo.ProjectName" in candidate_paths
-    assert "DataInfo.DT" in candidate_paths
+    # 规则提取器不再并行补充：ProjectName/DT 只应由 LLM 返回
+    assert "BuildingInfo.ProjectName" not in candidate_paths
+    assert "DataInfo.DT" not in candidate_paths
 
 
 def test_export_artifacts_writes_metadata_and_audit_when_ready(tmp_path: Path, artifact_dir: Path) -> None:

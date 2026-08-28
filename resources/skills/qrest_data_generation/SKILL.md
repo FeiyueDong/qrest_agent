@@ -1,3 +1,8 @@
+---
+name: qrest_data_generation
+description: 从元数据与时序数据生成 qREST 文件的工作流知识
+---
+
 # qREST Data Generation Skill
 
 Use this skill when the user wants to generate, preflight, or diagnose a qREST data artifact from metadata and time-series data.

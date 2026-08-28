@@ -1,3 +1,8 @@
+---
+name: data_info
+description: 数据包信息：事件、时间、采样参数
+---
+
 # DataInfo 专业知识 Skill
 
 数据包信息：时序数据的采集时间与采样参数。

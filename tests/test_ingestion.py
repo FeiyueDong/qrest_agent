@@ -65,7 +65,9 @@ def test_docx_and_pdf_ingestion_extract_equivalent_key_text(artifact_dir: Path) 
     assert summary["shared_checks"]["sampling_dt"]
 
 
-def test_agent_extracts_candidates_from_docx_and_pdf(artifact_dir: Path) -> None:
+def test_agent_extracts_common_fields_from_docx_and_pdf(artifact_dir: Path) -> None:
+    # 设计文档 §9：正式提取走 LLM+Skill；规则提取器只保留通用字段模式。
+    # 这里验证无模型模式下 docx/pdf 的通用字段（事件/采样参数）提取。
     outputs = {}
     for path in (DOCX_CASE, PDF_CASE):
         agent = QrestAgent()
@@ -74,31 +76,11 @@ def test_agent_extracts_candidates_from_docx_and_pdf(artifact_dir: Path) -> None
         outputs[path.suffix.removeprefix(".")] = result.to_dict()
 
         assert "DataInfo.EventName" in candidate_paths
-        assert "DataInfo.StartTime" in candidate_paths
         assert "DataInfo.DT" in candidate_paths
         assert "DataInfo.NPTS" in candidate_paths
-        assert "InstrumentInfo.ChannelNum" in candidate_paths
-        assert "InstrumentInfo.Channels" in candidate_paths
-        assert "BuildingInfo.StructuralFootprint.Parameters" in candidate_paths
-        assert "BuildingInfo.StructuralFootprint.BoundingBox" in candidate_paths
-        assert "BuildingInfo.Elevation" in candidate_paths
-
-        by_path = {candidate.field_path: candidate for candidate in result.candidates}
-        elevations = by_path["BuildingInfo.Elevation"].value
-        channels = by_path["InstrumentInfo.Channels"].value
-        channel_heights = sorted({channel["LocationXYZ"][2] for channel in channels})
-
-        assert len(elevations) == 16
-        assert elevations[:5] == [-2.6, 0.0, 4.5, 7.8, 11.1]
-        assert len(channels) == 18
-        assert channel_heights == [-2.6, 0.0, 11.1, 21.0, 30.9, 44.1]
-        assert channels[0]["LocationXYZ"] == [-20.6, -4.2, -2.6]
-        assert channels[0]["DeviceType"] == "941B"
-        assert result.report.ready
-        assert "InstrumentInfo.ChannelNum" not in result.report.conflicts
-        assert "InstrumentInfo.Channels" not in result.report.missing_required
-        assert "BuildingInfo.Elevation" not in result.report.missing_required
-        assert "BuildingInfo.ProjectName" in result.report.missing_optional
+        # 项目特定字段（Elevation/Channels 等）不再由规则模式猜测
+        assert "BuildingInfo.Elevation" not in candidate_paths
+        assert "InstrumentInfo.Channels" not in candidate_paths
 
     write_json(artifact_dir / "ingestion" / "document_agent_extraction_results.json", outputs)
 

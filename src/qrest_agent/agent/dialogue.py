@@ -5,12 +5,10 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Any
 
-from qrest_agent.agent.actions import ActionIntent, ActionInterpreter, FieldUpdate, should_interpret_action
 from qrest_agent.agent.agent import QrestAgent, TurnResult
 from qrest_agent.core.models import Candidate, Evidence, ValidationReport
 from qrest_agent.core.schema import QREST_FIELD_SPECS_BY_PATH
 from qrest_agent.core.validator import validate_state
-from qrest_agent.skills import SkillRegistry
 from qrest_agent.tools.qrest_data_tools import ToolResult
 
 
@@ -43,6 +41,11 @@ class DialogueResult:
 
 
 class ChatSession:
+    """轻量对话壳：自然语言一律交给主 Agent（QrestAgent），命令保留为调试入口。
+
+    主 Agent 的回复由 Responder 生成（LLM 自然回复 / 模板 fallback）。
+    """
+
     def __init__(
         self,
         agent: QrestAgent | None = None,
@@ -54,7 +57,6 @@ class ChatSession:
             self.agent.session_id = session_id
         self.session_id = session_id
         self.runtime_info = runtime_info or {"provider": "rule", "model": None, "extractor": "rule"}
-        self.action_interpreter = ActionInterpreter(getattr(self.agent, "llm_client", None))
         self.turns: list[DialogueTurn] = []
 
     def handle(self, message: str) -> DialogueResult:
@@ -66,18 +68,12 @@ class ChatSession:
             result = self._handle_command(text)
         else:
             turn_result = self.agent.run_turn(text=text)
-            if turn_result.task_result is not None:
-                result = DialogueResult(
-                    response=turn_result.response,
-                    report=turn_result.report,
-                    candidates=turn_result.candidates,
-                    command=turn_result.plan.skill_name if turn_result.plan else None,
-                    tool_result=turn_result.task_result,
-                )
-            else:
-                result = self._handle_natural_language_action(text)
-                if result is None:
-                    result = _dialogue_from_agent_turn(turn_result, self.agent)
+            result = DialogueResult(
+                response=turn_result.response,
+                report=turn_result.report,
+                candidates=turn_result.candidates,
+                tool_result=turn_result.action_results or None,
+            )
 
         self.turns.append(DialogueTurn(role="assistant", text=result.response, payload=result.to_dict()))
         return result
@@ -85,7 +81,11 @@ class ChatSession:
     def handle_file(self, path: str) -> DialogueResult:
         self.turns.append(DialogueTurn(role="user", text=f"/file {path}"))
         turn_result = self.agent.run_turn(files=[path])
-        result = _dialogue_from_agent_turn(turn_result, self.agent)
+        result = DialogueResult(
+            response=turn_result.response,
+            report=turn_result.report,
+            candidates=turn_result.candidates,
+        )
         self.turns.append(DialogueTurn(role="assistant", text=result.response, payload=result.to_dict()))
         return result
 
@@ -104,13 +104,16 @@ class ChatSession:
                     "name": skill.name,
                     "policy_name": skill.policy.get("name", skill.name),
                     "version": skill.policy.get("version"),
+                    "description": skill.description,
                 }
                 for skill in skills
             ],
-            "skill_handlers": self.agent.handlers.list_names(),
+            "skill_handlers": self.agent.skills.list_names(),
             "task_logs": [item for item in artifacts if item["name"].endswith("_task_log.json")],
             "turns": [turn.to_dict() for turn in self.turns],
         }
+
+    # ---- 命令 ----
 
     def _handle_command(self, text: str) -> DialogueResult:
         try:
@@ -155,100 +158,11 @@ class ChatSession:
 
         raw_value = " ".join(parts[2:])
         value = _parse_confirmed_value(field_path, raw_value)
-        candidate = Candidate(
-            field_path=field_path,
-            value=value,
-            status="confirmed",
-            confidence=1.0,
-            evidence=[Evidence(source_id="user_confirmation", location="chat", text=raw_value)],
-        )
-        self.agent.working_state.submit(candidate)
+        evidence = [Evidence(source_id="user_confirmation", location="chat", text=raw_value)]
+        self.agent.working_state.confirm(field_path, value, evidence, updated_by="user")
         report = validate_state(self.agent.working_state)
         response = f"已确认 {field_path} = {json.dumps(value, ensure_ascii=False)}。\n{_build_next_question(report, self.agent)}"
-        return DialogueResult(response=response, report=report, candidates=[candidate], command=command)
-
-    def _handle_natural_language_action(self, text: str) -> DialogueResult | None:
-        if not should_interpret_action(text, self.agent.working_state):
-            return None
-        intent = self.action_interpreter.interpret(text, self.agent.working_state)
-        if intent.action == "none":
-            return None
-        if intent.action == "resolve_conflicts":
-            return self._resolve_conflicts_from_intent(text, intent)
-        if intent.action == "confirm_field":
-            return self._confirm_fields_from_intent(text, intent)
-        return None
-
-    def _resolve_conflicts_from_intent(self, text: str, intent: ActionIntent) -> DialogueResult:
-        report = validate_state(self.agent.working_state)
-        if not report.conflicts:
-            return self._command_result("当前没有冲突字段需要处理。", command="resolve_conflicts")
-
-        field_paths = report.conflicts if intent.scope == "all" else [path for path in intent.field_paths if path in report.conflicts]
-        candidates: list[Candidate] = []
-        skipped: list[str] = []
-        for field_path in field_paths:
-            record = self.agent.working_state.records.get(field_path)
-            if record is None:
-                skipped.append(field_path)
-                continue
-            if intent.choice == "alternative":
-                if not record.alternatives:
-                    skipped.append(field_path)
-                    continue
-                chosen = record.alternatives[-1]
-                value = chosen.value
-                evidence = list(chosen.evidence)
-            else:
-                value = record.value
-                evidence = list(record.evidence)
-
-            candidate = Candidate(
-                field_path=field_path,
-                value=value,
-                status="confirmed",
-                confidence=1.0,
-                evidence=[
-                    *evidence,
-                    Evidence(source_id="user_confirmation", location="chat", text=text),
-                ],
-            )
-            self.agent.working_state.submit(candidate)
-            candidates.append(candidate)
-
-        report = validate_state(self.agent.working_state)
-        choice_text = "候选值" if intent.choice == "alternative" else "当前值"
-        lines = [f"已根据你的描述将 {len(candidates)} 个冲突字段确认采用{choice_text}。"]
-        if intent.source:
-            lines.append(f"动作解释来源：{intent.source}。")
-        if skipped:
-            lines.append("以下字段未能自动处理：" + "，".join(skipped))
-        if candidates:
-            lines.append(_format_candidates(candidates))
-        lines.append(_build_next_question(report, self.agent))
-        return DialogueResult(response="\n".join(line for line in lines if line), report=report, candidates=candidates, command="resolve_conflicts")
-
-    def _confirm_fields_from_intent(self, text: str, intent: ActionIntent) -> DialogueResult:
-        candidates: list[Candidate] = []
-        skipped: list[str] = []
-        for update in intent.updates:
-            candidate = _candidate_from_field_update(update, text)
-            if candidate is None:
-                skipped.append(update.field_path)
-                continue
-            self.agent.working_state.submit(candidate)
-            candidates.append(candidate)
-
-        report = validate_state(self.agent.working_state)
-        lines = [f"已根据你的描述确认 {len(candidates)} 个字段。"]
-        if intent.source:
-            lines.append(f"动作解释来源：{intent.source}。")
-        if skipped:
-            lines.append("以下字段未能自动处理：" + "，".join(skipped))
-        if candidates:
-            lines.append(_format_candidates(candidates))
-        lines.append(_build_next_question(report, self.agent))
-        return DialogueResult(response="\n".join(line for line in lines if line), report=report, candidates=candidates, command="confirm_fields")
+        return DialogueResult(response=response, report=report, command=command)
 
     def _file(self, parts: list[str], command: str) -> DialogueResult:
         if len(parts) != 2:
@@ -257,24 +171,23 @@ class ChatSession:
             turn = self.agent.run_turn(files=[parts[1]])
         except Exception as exc:
             return self._command_result(f"文件解析失败：{exc}", command=command)
-        result = _dialogue_from_agent_turn(turn, self.agent)
-        result.command = command
+        result = DialogueResult(
+            response=turn.response,
+            report=turn.report,
+            candidates=turn.candidates,
+            command=command,
+        )
         return result
 
     def _tools(self, command: str) -> DialogueResult:
-        skills = SkillRegistry().list_skills()
+        skills = self.agent.skills.list_skills()
         lines = ["可用 skills："]
         if skills:
             for skill in skills:
-                policy_name = skill.policy.get("name", skill.name)
-                version = skill.policy.get("version")
-                suffix = f" (v{version})" if version else ""
-                lines.append(f"- {policy_name}{suffix}: {skill.root}")
+                description = f" - {skill.description}" if skill.description else ""
+                lines.append(f"- {skill.name}{description}: {skill.root}")
         else:
             lines.append("- 当前未注册 repo-native skill。")
-        lines.append("已注册 skill handlers：")
-        for name in self.agent.handlers.list_names():
-            lines.append(f"- {name}")
         lines.append("Deterministic tools：")
         for spec in self.agent.tools.list_specs():
             lines.append(f"- {spec.name}: {spec.description}")
@@ -328,7 +241,7 @@ class ChatSession:
         return self._command_result(
             "\n".join(
                 [
-                    "可直接输入 qREST 任务或工程描述；自然语言任务会优先由 skill handler 处理。",
+                    "可直接输入 qREST 任务或工程描述；主 Agent 会自主选择 Skill、调用 Tool 并回复。",
                     _build_runtime_summary(self.runtime_info),
                     "自然语言任务示例：",
                     "解析 resources/qrest_data/examples/kunming2/kunming2.qrest 并导入当前项目",
@@ -341,7 +254,7 @@ class ChatSession:
                     "/missing 查看仍缺少的必要字段",
                     "/conflicts 查看冲突字段",
                     "/file path 解析上传资料",
-                    "/tools 查看可用 skills、skill handlers 和 deterministic tools",
+                    "/tools 查看可用 skills 和 deterministic tools",
                     "/confirm Field.Path value 确认或修正字段值",
                     "低层快捷命令：",
                     "/load-qrest input.qrest [source_metadata.json] 解析 qREST 文件",
@@ -356,28 +269,6 @@ class ChatSession:
         return DialogueResult(response=response, report=validate_state(self.agent.working_state), command=command)
 
 
-def _dialogue_from_agent_turn(turn: TurnResult, agent: QrestAgent) -> DialogueResult:
-    extracted = _format_candidates(turn.candidates)
-    next_question = _build_next_question(turn.report, agent)
-    fallback = f"注意：{turn.fallback_reason}，已回退到规则抽取。\n" if turn.fallback_reason else ""
-    tool_lines = _format_tool_results(turn.tool_results)
-    guidance = (
-        _format_guidance(turn.decision.guidance)
-        if turn.decision.action in {"ask_missing", "review_warnings", "resolve_conflicts"}
-        else ""
-    )
-    parts = []
-    if fallback:
-        parts.append(fallback.rstrip())
-    parts.append(extracted if extracted else "我没有从这轮输入中提取到新的 qREST 候选字段。")
-    if tool_lines:
-        parts.append(tool_lines)
-    if guidance:
-        parts.append(guidance)
-    parts.append(next_question)
-    return DialogueResult(response="\n".join(parts), report=turn.report, candidates=turn.candidates)
-
-
 def _format_candidates(candidates: list[Candidate]) -> str:
     non_empty = [candidate for candidate in candidates if candidate.value is not None]
     if not non_empty:
@@ -387,27 +278,6 @@ def _format_candidates(candidates: list[Candidate]) -> str:
         value = json.dumps(candidate.value, ensure_ascii=False)
         lines.append(f"- {candidate.field_path} = {value} ({candidate.status}, confidence={candidate.confidence:.2f})")
     return "\n".join(lines)
-
-
-def _format_tool_results(tool_results: list[dict[str, Any]]) -> str:
-    lines: list[str] = []
-    for item in tool_results or []:
-        tool = item.get("tool")
-        if tool == "calculate_frequency":
-            lines.append(f"工具计算：Frequency = 1 / DT = {item.get('value')} Hz")
-        elif tool == "derive_counts":
-            source = ", ".join(item.get("derived_from") or [])
-            lines.append(f"工具推导：{item.get('field_path')} = {item.get('value')}（derived_from {source}）")
-        elif item.get("ok") and tool == "read_document":
-            output = item.get("output") or {}
-            lines.append(f"工具读取：{output.get('path')}（{output.get('chunk_count', 0)} 个文本块）")
-    return "\n".join(lines)
-
-
-def _format_guidance(guidance: list[str]) -> str:
-    if not guidance:
-        return ""
-    return "\n".join(f"参考 Skill {entry}" for entry in guidance)
 
 
 def _format_tool_result(tool_name: str, result: ToolResult) -> str:
@@ -523,17 +393,13 @@ def _build_state_summary(agent: QrestAgent) -> str:
     return "\n".join(lines)
 
 
-def _candidate_from_field_update(update: FieldUpdate, text: str) -> Candidate | None:
-    if update.field_path not in QREST_FIELD_SPECS_BY_PATH:
-        return None
-    value = _coerce_confirmed_value(update.field_path, update.value)
-    return Candidate(
-        field_path=update.field_path,
-        value=value,
-        status="confirmed",
-        confidence=1.0,
-        evidence=[Evidence(source_id="user_confirmation", location="chat", text=text)],
-    )
+def _parse_confirmed_value(field_path: str, raw_value: str) -> Any:
+    stripped = raw_value.strip()
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        parsed = stripped
+    return _coerce_confirmed_value(field_path, parsed)
 
 
 def _coerce_confirmed_value(field_path: str, value: Any) -> Any:
@@ -549,12 +415,3 @@ def _coerce_confirmed_value(field_path: str, value: Any) -> Any:
         except ValueError:
             return value
     return value
-
-
-def _parse_confirmed_value(field_path: str, raw_value: str) -> Any:
-    stripped = raw_value.strip()
-    try:
-        parsed = json.loads(stripped)
-    except json.JSONDecodeError:
-        parsed = stripped
-    return _coerce_confirmed_value(field_path, parsed)

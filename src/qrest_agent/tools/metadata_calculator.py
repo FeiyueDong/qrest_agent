@@ -138,15 +138,15 @@ def build_channel_layout(
     footprint_width: float,
     device_type: str | None = None,
     per_floor_count: int = 3,
+    template_id: str = "qrest_three_sensor_template_v1",
 ) -> list[dict[str, Any]]:
-    """由监测楼层与平面尺寸生成确定性的通道布置。
+    """按明确模板生成通道布置（设计文档 §13：假设型推导不得作为普通 derived）。
 
-    约定（与既有测试案例一致）：
-    - 每层 3 个测点：左右两侧（X = ±x_edge，Azimuth=90°）与中部（X=0，Azimuth=0°）；
-    - x_edge = max(长度/2 - 0.4, 长度/2 * 0.95)，y 线 = -宽度/6；
-    - ChannelNo 从 1 起连续递增；ChannelID 未知时写 "UNKNOWN"（待用户确认，不猜测）；
-    - 仅当每层测点数明确为 3 时才生成（其余情况返回空列表，交由询问）。
+    只有用户/资料明确指出采用该模板（template_id）时才能调用；
+    否则 Agent 应询问实际布置，或把结果标记为 inferred。
     """
+    if template_id != "qrest_three_sensor_template_v1":
+        return []
     if per_floor_count != 3:
         return []
     x_edge = _round_m(max(footprint_length / 2 - 0.4, footprint_length / 2 * 0.95), digits=1)

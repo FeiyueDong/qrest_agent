@@ -9,15 +9,27 @@ from qrest_agent.core.models import Candidate, Evidence
 from qrest_agent.core.schema import QREST_FIELD_SPECS_BY_PATH, QREST_REQUIRED_PATHS
 from qrest_agent.ingestion.sources import SourceChunk
 from qrest_agent.llm.clients import BaseLLMClient
-from qrest_agent.tools.metadata_calculator import (
-    ElevationProfile,
-    build_channel_layout,
-    calculate_bounding_box,
-    derive_elevation_profile,
-)
+
+#: LLM 候选允许的状态；其他状态直接拒绝。
+_ALLOWED_CANDIDATE_STATUSES = {
+    "extracted",
+    "derived",
+    "confirmed",
+    "missing",
+    "uncertain",
+    "inferred",
+    "conflict",
+}
 
 
 class LLMExtractor:
+    """正式提取路径：LLM + selected Skills 的语义提取（设计文档 §9）。
+
+    Candidate 必须通过证据校验（§11）：
+    - value != null 且 status 为 extracted/confirmed 时，evidence 为空 → 拒绝；
+    - evidence.text 无法在来源 chunk 中找到（归一化后）→ 降为 uncertain。
+    """
+
     def __init__(self, client: BaseLLMClient) -> None:
         self.client = client
 
@@ -31,25 +43,27 @@ class LLMExtractor:
             result = self.client.complete_json(messages)
             for item in result.get("candidates", []):
                 candidate = _candidate_from_model_item(item, chunk)
-                if candidate is not None:
-                    candidates.append(candidate)
+                if candidate is None:
+                    continue
+                validated = _validate_llm_candidate(candidate, chunk)
+                if validated is not None:
+                    candidates.append(validated)
         return candidates
 
 
 class RuleBasedExtractor:
-    """Small offline extractor used for smoke tests before an LLM is configured."""
+    """离线/无模型/测试模式的确定性兜底提取（设计文档 §9 fallback）。
+
+    只保留通用字段模式，不包含任何项目特定解析逻辑。
+    """
 
     def extract(self, chunks: list[SourceChunk]) -> list[Candidate]:
         candidates: list[Candidate] = []
         for chunk in chunks:
             candidates.extend(_extract_from_json(chunk))
             candidates.extend(_extract_from_text(chunk))
-        candidates.extend(_extract_cross_chunk_patterns(chunks))
         return candidates
 
-
-# ElevationProfile 与楼层/通道推导逻辑已拆分到
-# qrest_agent.tools.metadata_calculator（确定性计算 Tool），本模块只负责文本参数提取。
 
 def _extract_from_json(chunk: SourceChunk) -> list[Candidate]:
     text = chunk.text.strip()
@@ -131,302 +145,35 @@ def _extract_from_text(chunk: SourceChunk) -> list[Candidate]:
         if match:
             raw_value = match.group(1)
             candidates.append(_candidate(field_path, caster(raw_value), chunk, evidence_text=match.group(0)))
-
-    candidates.extend(_extract_kunming_document_patterns(text, chunk))
     return candidates
 
 
-def _extract_cross_chunk_patterns(chunks: list[SourceChunk]) -> list[Candidate]:
-    if not chunks:
-        return []
-    text = "\n".join(chunk.text for chunk in chunks)
-    chunk = _combined_chunk(chunks, text)
-    candidates: list[Candidate] = []
+def _validate_llm_candidate(candidate: Candidate, chunk: SourceChunk) -> Candidate | None:
+    """Candidate 证据校验（设计文档 §11）：防 LLM 幻觉 value + 伪造 evidence。"""
+    if candidate.status not in _ALLOWED_CANDIDATE_STATUSES:
+        return None
+    if candidate.value is None:
+        return candidate
 
-    profile = _parse_elevation_profile(text)
-    if profile is not None:
-        evidence = _elevation_evidence(text)
-        candidates.append(
-            _candidate(
-                "BuildingInfo.ElevationNum",
-                len(profile.elevations),
-                chunk,
-                status="derived",
-                confidence=0.8,
-                evidence_text=evidence,
-            )
-        )
-        candidates.append(
-            _candidate(
-                "BuildingInfo.Elevation",
-                profile.elevations,
-                chunk,
-                status="derived",
-                confidence=0.75,
-                evidence_text=evidence,
-            )
-        )
-
-    channels = _derive_channels_from_layout(text, profile)
-    if channels:
-        candidates.append(
-            _candidate(
-                "InstrumentInfo.ChannelNum",
-                len(channels),
-                chunk,
-                status="derived",
-                confidence=0.75,
-                evidence_text=_channel_evidence(text),
-            )
-        )
-        candidates.append(
-            _candidate(
-                "InstrumentInfo.Channels",
-                channels,
-                chunk,
-                status="derived",
-                confidence=0.6,
-                evidence_text=_channel_evidence(text),
-            )
-        )
-
-    return candidates
-
-
-def _extract_kunming_document_patterns(text: str, chunk: SourceChunk) -> list[Candidate]:
-    candidates: list[Candidate] = []
-
-    floor_match = re.search(r"地上共有\s*(\d+)\s*层，地下共有\s*(\d+)\s*层", text)
-    if floor_match:
-        above_ground = int(floor_match.group(1))
-        basement = int(floor_match.group(2))
-        candidates.append(
-            _candidate(
-                "BuildingInfo.ElevationNum",
-                above_ground + basement,
-                chunk,
-                status="derived",
-                confidence=0.75,
-                evidence_text=floor_match.group(0),
-            )
-        )
-
-    if "钢框架体系" in text or "钢框架" in text:
-        candidates.append(
-            _candidate(
-                "BuildingInfo.StructuralType",
-                "SteelFrame",
-                chunk,
-                status="derived",
-                confidence=0.7,
-                evidence_text="钢框架体系",
-            )
-        )
-
-    footprint_match = re.search(
-        r"(?:结构长度方向约为|结构长度方向|长度方向约为)\s*([0-9]+(?:\.[0-9]+)?)\s*m[，,、\s]*(?:宽度方向约为|宽度方向|宽度)\s*([0-9]+(?:\.[0-9]+)?)\s*m",
-        text,
-    )
-    if footprint_match:
-        length = float(footprint_match.group(1))
-        width = float(footprint_match.group(2))
-        candidates.append(_candidate("BuildingInfo.StructuralFootprint.Shape", "Rectangular", chunk, confidence=0.8, evidence_text=footprint_match.group(0)))
-        candidates.append(
-            _candidate(
-                "BuildingInfo.StructuralFootprint.Parameters",
-                {"Length": length, "Width": width},
-                chunk,
-                confidence=0.8,
-                evidence_text=footprint_match.group(0),
-            )
-        )
-        candidates.append(
-            _candidate(
-                "BuildingInfo.StructuralFootprint.BoundingBox",
-                calculate_bounding_box(length, width),
-                chunk,
-                status="derived",
-                confidence=0.7,
-                evidence_text=footprint_match.group(0),
-            )
-        )
-
-    channel_match = re.search(r"(?:共布置|总计布置|总共布置)\s*(\d+)\s*个单向加速度传感器", text)
-    if channel_match:
-        candidates.append(
-            _candidate(
-                "InstrumentInfo.ChannelNum",
-                int(channel_match.group(1)),
-                chunk,
-                confidence=0.85,
-                evidence_text=channel_match.group(0),
-            )
-        )
-
-    provider_match = re.search(r"系统采用(.+?)研制的\s*([A-Za-z0-9]+)\s*型加速度传感器", text)
-    if provider_match:
-        candidates.append(
-            _candidate(
-                "InstrumentInfo.Provider",
-                provider_match.group(1),
-                chunk,
-                confidence=0.65,
-                evidence_text=provider_match.group(0),
-            )
-        )
-
-    start_match = re.search(r"数据开始时间[:：]\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})（UTC\+8）", text)
-    if start_match:
-        candidates.append(
-            _candidate(
-                "DataInfo.StartTime",
-                f"{start_match.group(1)}T{start_match.group(2)}.000+08:00",
-                chunk,
-                confidence=0.9,
-                evidence_text=start_match.group(0),
-            )
-        )
-
-    return candidates
-
-
-def _parse_elevation_profile(text: str) -> ElevationProfile | None:
-    floor_match = re.search(r"地上共有\s*(\d+)\s*层[，,、\s]*地下共有\s*(\d+)\s*层", text)
-    first_match = re.search(r"首层高度\s*(?:为|是|:|：)?\s*([0-9]+(?:\.[0-9]+)?)\s*m", text)
-    typical_match = re.search(r"其余地上楼层层高均为\s*([0-9]+(?:\.[0-9]+)?)\s*m", text)
-    if not (floor_match and first_match and typical_match):
+    # 11.1 禁止自动补 evidence：extracted/confirmed 必须有证据
+    if candidate.status in {"extracted", "confirmed"} and not candidate.evidence:
         return None
 
-    above_ground = int(floor_match.group(1))
-    basement = int(floor_match.group(2))
-    first_height = float(first_match.group(1))
-    typical_height = float(typical_match.group(1))
-    basement_first = _optional_float_match(r"地下第一层层高\s*(?:为|是|:|：)?\s*([0-9]+(?:\.[0-9]+)?)\s*m", text)
-    basement_second = _optional_float_match(r"地下第二层层高\s*(?:为|是|:|：)?\s*([0-9]+(?:\.[0-9]+)?)\s*m", text)
-
-    return derive_elevation_profile(
-        above_ground_floors=above_ground,
-        basement_floors=basement,
-        first_floor_height=first_height,
-        typical_above_height=typical_height,
-        basement_first_height=basement_first,
-        basement_second_height=basement_second,
-    )
+    # 11.2 evidence 可验证：文本归一化后必须在来源 chunk 中能找到
+    if candidate.status in {"extracted", "confirmed", "uncertain"} and candidate.evidence:
+        source_text = _normalize_evidence_text(chunk.text)
+        if not any(
+            evidence.text and _normalize_evidence_text(evidence.text) in source_text
+            for evidence in candidate.evidence
+        ):
+            # 伪造/不可验证的 evidence：降为 uncertain，保留审计信息，禁止进入最终数据
+            candidate.status = "uncertain"
+            candidate.confidence = min(candidate.confidence, 0.4)
+    return candidate
 
 
-def _derive_channels_from_layout(text: str, profile: ElevationProfile | None) -> list[dict[str, Any]]:
-    if profile is None:
-        return []
-    monitored_floors = _parse_monitored_floors(text)
-    if not monitored_floors:
-        return []
-    per_floor_count = _parse_per_floor_sensor_count(text)
-    if per_floor_count != 3:
-        return []
-    footprint = _parse_footprint_size(text)
-    if footprint is None:
-        return []
-    if not re.search(r"左[右侧区域\s、及以及和]*右|左右两侧|左侧区域、右侧区域以及中间区域|中部区域", text):
-        return []
-
-    length, width = footprint
-    device_type = _parse_device_type(text)
-    return build_channel_layout(
-        monitored_floors=monitored_floors,
-        profile=profile,
-        footprint_length=length,
-        footprint_width=width,
-        device_type=device_type,
-        per_floor_count=per_floor_count,
-    )
-
-
-def _parse_monitored_floors(text: str) -> list[str | int]:
-    match = re.search(r"监测楼层包括(.+?)(?:。|\n)", text)
-    if not match:
-        return []
-    section = match.group(1)
-    token_pattern = re.compile(r"地下第一层(?:（B1F）|\(B1F\))?|B1F|地上首层|首层|(\d+)\s*层")
-    floors: list[str | int] = []
-    for token in token_pattern.finditer(section):
-        raw = token.group(0)
-        if "地下第一层" in raw or "B1F" in raw:
-            value: str | int = "B1F"
-        elif "首层" in raw:
-            value = 1
-        else:
-            value = int(token.group(1))
-        if value not in floors:
-            floors.append(value)
-    return floors
-
-
-def _parse_per_floor_sensor_count(text: str) -> int | None:
-    match = re.search(r"每个(?:监测楼层|位置)\s*布置\s*(\d+)\s*个(?:单向)?加速度传感器|每(?:层|个位置)设置\s*(\d+)\s*个(?:水平向|单向)?加速度测点", text)
-    if not match:
-        return None
-    value = match.group(1) or match.group(2)
-    return int(value)
-
-
-def _parse_footprint_size(text: str) -> tuple[float, float] | None:
-    match = re.search(
-        r"(?:结构长度方向约为|结构长度方向|长度方向约为)\s*([0-9]+(?:\.[0-9]+)?)\s*m[，,、\s]*(?:宽度方向约为|宽度方向|宽度)\s*([0-9]+(?:\.[0-9]+)?)\s*m",
-        text,
-    )
-    if match:
-        return float(match.group(1)), float(match.group(2))
-    match = re.search(r"建筑平面尺寸约为\s*([0-9]+(?:\.[0-9]+)?)\s*m?\s*[×xX]\s*([0-9]+(?:\.[0-9]+)?)\s*m", text)
-    if match:
-        return float(match.group(1)), float(match.group(2))
-    return None
-
-
-def _parse_device_type(text: str) -> str | None:
-    match = re.search(r"研制的\s*([A-Za-z0-9]+)\s*型加速度传感器", text)
-    return match.group(1) if match else None
-
-
-def _optional_float_match(pattern: str, text: str) -> float | None:
-    match = re.search(pattern, text)
-    return float(match.group(1)) if match else None
-
-
-def _combined_chunk(chunks: list[SourceChunk], text: str) -> SourceChunk:
-    source_ids = ",".join(dict.fromkeys(chunk.source_id for chunk in chunks[:5]))
-    if len(chunks) > 5:
-        source_ids = f"{source_ids},..."
-    return SourceChunk(source_id=source_ids or "combined_sources", location="cross_chunk", text=text[:3000], source_type="derived")
-
-
-def _elevation_evidence(text: str) -> str:
-    snippets = []
-    for pattern in (
-        r"建筑地上共有.+?地下共有.+?层",
-        r"首层高度.+?m",
-        r"其余地上楼层层高均为.+?m",
-        r"地下第一层层高.+?m",
-        r"地下第二层层高.+?m",
-    ):
-        match = re.search(pattern, text)
-        if match:
-            snippets.append(match.group(0))
-    return "；".join(snippets)[:500]
-
-
-def _channel_evidence(text: str) -> str:
-    snippets = []
-    for pattern in (
-        r"监测楼层包括.+?(?:。|\n)",
-        r"每个监测楼层布置.+?(?:。|\n)",
-        r"每层设置三个.+?(?:。|\n)",
-        r"测点分别位于.+?(?:。|\n)",
-        r"系统采用.+?型加速度传感器",
-    ):
-        match = re.search(pattern, text)
-        if match:
-            snippets.append(match.group(0).strip())
-    return "；".join(snippets)[:800]
+def _normalize_evidence_text(text: str) -> str:
+    return re.sub(r"\s+", "", text).lower()
 
 
 def _candidate(
@@ -463,9 +210,7 @@ def _candidate_from_model_item(item: Any, chunk: SourceChunk) -> Candidate | Non
                 evidence_items.append(evidence)
             elif isinstance(evidence, str):
                 evidence_items.append({"source_id": chunk.source_id, "location": chunk.location, "text": evidence})
-    if not evidence_items and item.get("value") is not None:
-        evidence_items.append({"source_id": chunk.source_id, "location": chunk.location, "text": chunk.text[:300]})
-
+    # 设计文档 §11.1：不自动把整个 chunk 当作 evidence；缺失时由 _validate_llm_candidate 拒绝
     item["evidence"] = evidence_items
     return Candidate.from_dict(item)
 

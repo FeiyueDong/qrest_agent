@@ -1,3 +1,8 @@
+---
+name: qrest_data_loading
+description: 解析与导入已有 qREST 文件的工作流知识
+---
+
 # qREST Data Loading Skill
 
 Use this skill when the user wants to inspect, parse, load, convert, or import an existing `.qrest` file.

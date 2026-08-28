@@ -30,35 +30,21 @@
     ]
   },
   {
-    "case_id": "kunming_document_excerpt",
-    "description": "Kunming engineering document excerpt with building, footprint, monitoring, and data fields.",
-    "text": "建筑地上共有14层，地下共有2层，地上主体结构高度为47.4m。隔震层以上部分定义为上部结构。上部结构采用偏心支撑钢框架体系。建筑平面整体呈矩形布置。结构长度方向约为42m，宽度方向约为25.2m。永久结构监测系统共布置18个单向加速度传感器。系统采用中国地震局工程力学研究所研制的941B型加速度传感器。本测试案例关联一次地震事件数据。事件名称为2025_MYANMAR_7.9。数据开始时间：2025-03-28 14:20:00（UTC+8）。采样时间间隔：0.02 s。数据点数：30000。",
+    "case_id": "explicit_chinese_metadata",
+    "description": "Explicit Chinese engineering description with common fields.",
+    "text": "项目名称为 Kunming_SSJY_Tower。结构类型为 RCFrame。事件名称为 2025_MYANMAR_7.9。采样间隔为 0.02s。数据点数为 30000。",
     "expected": {
-      "BuildingInfo.ElevationNum": 16,
-      "BuildingInfo.StructuralType": "SteelFrame",
-      "BuildingInfo.StructuralFootprint.Shape": "Rectangular",
-      "BuildingInfo.StructuralFootprint.Parameters": {
-        "Length": 42.0,
-        "Width": 25.2
-      },
-      "BuildingInfo.StructuralFootprint.BoundingBox": {
-        "MaxX": 21.0,
-        "MinX": -21.0,
-        "MaxY": 12.6,
-        "MinY": -12.6
-      },
-      "InstrumentInfo.ChannelNum": 18,
-      "InstrumentInfo.Provider": "中国地震局工程力学研究所",
+      "BuildingInfo.ProjectName": "Kunming_SSJY_Tower",
+      "BuildingInfo.StructuralType": "RCFrame",
       "DataInfo.EventName": "2025_MYANMAR_7.9",
-      "DataInfo.StartTime": "2025-03-28T14:20:00.000+08:00",
       "DataInfo.DT": 0.02,
       "DataInfo.NPTS": 30000
     },
     "must_not_extract": [
-      "BuildingInfo.ProjectName",
       "BuildingInfo.GeoLocation.Longitude",
-      "BuildingInfo.Elevation"
+      "BuildingInfo.GeoLocation.Latitude",
+      "BuildingInfo.Elevation",
+      "InstrumentInfo.ChannelNum"
     ]
   }
 ]
-

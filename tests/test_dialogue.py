@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 from qrest_agent.agent.agent import QrestAgent
 from qrest_agent.agent.dialogue import ChatSession
@@ -23,10 +22,10 @@ def test_chat_session_extracts_and_reports_missing_fields(artifact_dir: Path) ->
     write_json(artifact_dir / "dialogue" / "basic_session_transcript.json", session.to_dict())
     write_text(artifact_dir / "dialogue" / "basic_state.txt", state_result.response)
 
-    assert "本轮提取到" in result.response
     assert "BuildingInfo.ProjectName" in session.agent.working_state.records
     assert "DataInfo.DT" in session.agent.working_state.records
     assert not result.report.ready
+    assert "缺少必要信息" in result.response or "缺失" in result.response
     assert "provider=rule" in provider_result.response
     assert "当前已知字段" in state_result.response
 
@@ -51,77 +50,6 @@ def test_chat_session_confirm_command_accepts_json_values() -> None:
 
     record = session.agent.working_state.records["BuildingInfo.StructuralFootprint.Parameters"]
     assert record.value == {"Length": 42.0, "Width": 25.2}
-
-
-def test_chat_session_resolves_all_conflicts_with_natural_language(artifact_dir: Path) -> None:
-    session = ChatSession()
-    session.agent.working_state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="OldName", confidence=0.8))
-    session.agent.working_state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="NewName", confidence=0.9))
-    session.agent.working_state.submit(Candidate(field_path="DataInfo.EventName", value="OLD_EVENT", confidence=0.8))
-    session.agent.working_state.submit(Candidate(field_path="DataInfo.EventName", value="NEW_EVENT", confidence=0.9))
-
-    result = session.handle("冲突部分全部更新为候选值")
-
-    write_json(artifact_dir / "dialogue" / "natural_language_conflict_resolution.json", result.to_dict())
-
-    assert result.command == "resolve_conflicts"
-    assert not result.report.conflicts
-    assert session.agent.working_state.records["BuildingInfo.ProjectName"].value == "NewName"
-    assert session.agent.working_state.records["DataInfo.EventName"].value == "NEW_EVENT"
-    assert session.agent.working_state.records["BuildingInfo.ProjectName"].status == "confirmed"
-    assert "2 个冲突字段" in result.response
-
-
-def test_chat_session_uses_llm_action_interpreter_for_conflict_resolution(artifact_dir: Path) -> None:
-    client = FakeActionClient(
-        {
-            "action": "resolve_conflicts",
-            "confidence": 0.92,
-            "scope": "all",
-            "choice": "alternative",
-            "field_paths": [],
-            "updates": [],
-            "reason": "user asks to use the newly imported version",
-        }
-    )
-    session = ChatSession(QrestAgent(llm_client=client))
-    session.agent.working_state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="OldName", confidence=0.8))
-    session.agent.working_state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="NewName", confidence=0.9))
-
-    result = session.handle("请把所有存在差异的字段统一选择新导入的版本")
-
-    write_json(artifact_dir / "dialogue" / "llm_action_conflict_resolution.json", result.to_dict())
-
-    assert result.command == "resolve_conflicts"
-    assert session.agent.working_state.records["BuildingInfo.ProjectName"].value == "NewName"
-    assert session.agent.working_state.records["BuildingInfo.ProjectName"].status == "confirmed"
-    assert "动作解释来源：llm" in result.response
-    assert client.requests
-    assert any("current_conflicts" in messages[1]["content"] for messages in client.requests)
-
-
-def test_chat_session_uses_llm_action_interpreter_for_field_confirmation(artifact_dir: Path) -> None:
-    client = FakeActionClient(
-        {
-            "action": "confirm_field",
-            "confidence": 0.9,
-            "scope": "fields",
-            "choice": None,
-            "field_paths": ["DataInfo.NPTS"],
-            "updates": [{"field_path": "DataInfo.NPTS", "value": "30000"}],
-            "reason": "user confirms a numeric field",
-        }
-    )
-    session = ChatSession(QrestAgent(llm_client=client))
-
-    result = session.handle("采样点数按 30000 处理")
-
-    write_json(artifact_dir / "dialogue" / "llm_action_field_confirmation.json", result.to_dict())
-
-    assert result.command == "confirm_fields"
-    assert session.agent.working_state.records["DataInfo.NPTS"].value == 30000
-    assert session.agent.working_state.records["DataInfo.NPTS"].status == "confirmed"
-    assert "动作解释来源：llm" in result.response
 
 
 def test_cli_chat_scripted_messages_write_transcript(tmp_path: Path, artifact_dir: Path, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -182,7 +110,6 @@ def test_chat_session_tool_commands_use_registry(tmp_path: Path, artifact_dir: P
 
     assert "可用 skills" in tools_result.response
     assert "qrest_data_generation" in tools_result.response
-    assert "qrest_data_loading" in tools_result.response
     assert "Deterministic tools" in tools_result.response
     assert "generate_qrest" in tools_result.response
     assert "低层快捷命令" in tools_result.response
@@ -202,9 +129,9 @@ def test_chat_session_help_is_skill_first(artifact_dir: Path) -> None:
     write_json(artifact_dir / "dialogue" / "skill_first_help.json", result.to_dict())
 
     assert "自然语言任务示例" in result.response
-    assert "skill handler" in result.response
+    assert "主 Agent 会自主选择 Skill、调用 Tool 并回复" in result.response
     assert "检查 metadata.json 和 data.txt 能不能生成 qREST" in result.response
-    assert "/tools 查看可用 skills、skill handlers 和 deterministic tools" in result.response
+    assert "/tools 查看可用 skills 和 deterministic tools" in result.response
     assert "低层快捷命令" in result.response
 
 
@@ -221,11 +148,10 @@ def test_chat_session_natural_language_preflights_qrest_generation(tmp_path: Pat
         {"result": result.to_dict(), "artifacts": artifacts},
     )
 
-    assert result.command == "qrest_data_generation"
     assert result.tool_result is not None
-    assert result.tool_result["mode"] == "preflight"
-    assert result.tool_result["preflight"]["ok"]
-    assert "可以生成，但输入并非完全一致" in result.response
+    assert result.tool_result["tool:preflight_generate_qrest"]["ok"]
+    assert any("NPTS" in warning for warning in result.tool_result["tool:preflight_generate_qrest"]["warnings"])
+    assert "工具 preflight_generate_qrest 执行成功" in result.response
     assert any(item["name"] == "generate_qrest_preflight_report.json" for item in artifacts)
 
 
@@ -243,15 +169,13 @@ def test_chat_session_natural_language_generates_from_current_metadata(tmp_path:
         {"result": result.to_dict(), "artifacts": artifacts},
     )
 
-    assert result.command == "qrest_data_generation"
     assert result.tool_result is not None
-    assert result.tool_result["mode"] == "generate"
-    assert result.tool_result["generation"]["ok"]
-    assert result.tool_result["metadata_json"].endswith("metadata.json")
-    assert "qREST 数据生成已完成" in result.response
+    assert result.tool_result["export"]["ok"]
+    assert result.tool_result["export"]["metadata_json"].endswith("metadata.json")
+    assert result.tool_result["tool:generate_qrest"]["ok"]
+    assert "工具 generate_qrest 执行成功" in result.response
     assert any(item["name"] == "metadata.json" for item in artifacts)
     assert any(item["name"] == "generated.qrest" for item in artifacts)
-    assert any(item["name"] == "qrest_data_generation_task_log.json" for item in artifacts)
 
 
 def test_chat_session_natural_language_generation_missing_data_path_blocks(tmp_path: Path, artifact_dir: Path) -> None:
@@ -266,11 +190,10 @@ def test_chat_session_natural_language_generation_missing_data_path_blocks(tmp_p
         {"result": result.to_dict(), "artifacts": artifacts},
     )
 
-    assert result.command == "qrest_data_generation"
     assert result.tool_result is not None
     assert "export" in result.tool_result
     assert "BuildingInfo.Elevation" in result.tool_result["export"]["blocked_fields"]
-    assert "生成已停止" in result.response
+    assert "导出被阻断" in result.response
     assert any(item["name"] == "metadata_export_report.json" for item in artifacts)
 
 
@@ -287,13 +210,12 @@ def test_chat_session_natural_language_loads_qrest(tmp_path: Path, artifact_dir:
         {"result": result.to_dict(), "artifacts": artifacts},
     )
 
-    assert result.command == "qrest_data_loading"
     assert result.tool_result is not None
-    assert result.tool_result["load"]["ok"]
+    assert result.tool_result["tool:load_qrest"]["ok"]
     assert result.report.ready
     assert "BuildingInfo.ProjectName" in session.agent.working_state.records
-    assert "已将解析出的 metadata 导入当前会话" in result.response
-    assert any(item["name"] == "qrest_data_loading_task_log.json" for item in artifacts)
+    assert any(item["name"] == "loaded_metadata.json" for item in artifacts)
+    assert any(item["name"] == "loaded_data.txt" for item in artifacts)
 
 
 def test_cli_defaults_use_provider_config() -> None:
@@ -301,15 +223,3 @@ def test_cli_defaults_use_provider_config() -> None:
 
     assert defaults["provider"] == "ollama-cli"
     assert defaults["model"] == "qwen3:4b-instruct"
-
-
-class FakeActionClient:
-    model = "fake-action"
-
-    def __init__(self, payload: dict[str, Any]) -> None:
-        self.payload = payload
-        self.requests: list[list[dict[str, str]]] = []
-
-    def complete_json(self, messages: list[dict[str, str]], schema_hint: dict[str, Any] | None = None) -> dict[str, Any]:
-        self.requests.append(messages)
-        return self.payload

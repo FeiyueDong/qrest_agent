@@ -9,8 +9,6 @@ from qrest_agent.core.validator import validate_metadata
 from qrest_agent.ingestion.sources import SourceManager
 from qrest_agent.storage.artifacts import ArtifactManager
 from qrest_agent.tools.metadata_calculator import (
-    ElevationProfile,
-    build_channel_layout,
     calculate_bounding_box,
     calculate_frequency,
     derive_channel_num,
@@ -100,21 +98,7 @@ class ToolRegistry:
                 ),
                 _elevation_profile_tool,
             ),
-            "derive_channel_layout": (
-                ToolSpec(
-                    name="derive_channel_layout",
-                    description="Derive deterministic channel configuration from monitored floors and footprint size.",
-                    parameters={
-                        "profile": "Elevation profile dict as returned by derive_elevation_profile.",
-                        "monitored_floors": "List of monitored floors (e.g. [\"B1F\", 1, 3, 6]).",
-                        "length": "Building footprint length along X.",
-                        "width": "Building footprint width along Y.",
-                        "device_type": "Optional device type string.",
-                        "per_floor_count": "Sensors per monitored floor; only 3 is supported.",
-                    },
-                ),
-                _channel_layout_tool,
-            ),
+
             "derive_counts": (
                 ToolSpec(
                     name="derive_counts",
@@ -281,25 +265,6 @@ def _elevation_profile_tool(
         "elevations": profile.elevations,
         "elevation_num": len(profile.elevations),
     }
-
-
-def _channel_layout_tool(
-    profile: dict[str, Any],
-    monitored_floors: list[str | int],
-    length: float,
-    width: float,
-    device_type: str | None = None,
-    per_floor_count: int = 3,
-) -> dict[str, Any]:
-    channels = build_channel_layout(
-        monitored_floors=monitored_floors,
-        profile=ElevationProfile.from_dict(profile),
-        footprint_length=length,
-        footprint_width=width,
-        device_type=device_type,
-        per_floor_count=per_floor_count,
-    )
-    return {"channels": channels, "channel_num": len(channels)}
 
 
 def _table_reader_tool(rows: list[str], delimiter: str = ",") -> dict[str, Any]:

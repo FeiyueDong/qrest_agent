@@ -71,7 +71,7 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
     assert 'id="recordsTree"' in index_html
     assert 'id="skillList"' in index_html
     assert 'id="taskLogList"' in index_html
-    assert "自然语言任务会优先由 skill handler 处理" in index_html
+    assert "自然语言任务由主 Agent 自主处理" in index_html
     assert "检查 metadata.json 和 data.txt 能不能生成 qREST" in index_html
     assert 'data-record-filter="known"' in index_html
     assert 'data-record-filter="missing"' in index_html
@@ -95,8 +95,8 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
     assert "skill_handlers" in session
     assert "task_logs" in session
     assert upload["uploaded"]["file_name"] == "web_note.txt"
-    assert task["command"] == "qrest_data_loading"
-    assert any(item["name"] == "qrest_data_loading_task_log.json" for item in session["task_logs"])
+    assert task["tool_result"]["tool:load_qrest"]["ok"] is True
+    assert isinstance(session["task_logs"], list)
     assert not export["ok"]
     assert any(item["name"] == "metadata_export_report.json" for item in artifacts["artifacts"])
     assert any(item["name"] == "uploads/web_note.txt" for item in artifacts["artifacts"])

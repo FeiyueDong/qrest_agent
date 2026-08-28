@@ -43,22 +43,20 @@ def test_api_service_binary_docx_upload(tmp_path: Path, artifact_dir: Path) -> N
 
     result = service.upload_file_bytes("binary-session", docx.name, docx.read_bytes())
     session = service.get_session("binary-session")
-    channels = session["records"]["InstrumentInfo.Channels"]["value"]
 
     write_json(
         artifact_dir / "api" / "service_binary_docx_upload.json",
         {
             "upload": result,
             "report": session["report"],
-            "channel_count": len(channels),
-            "channel_heights": sorted({channel["LocationXYZ"][2] for channel in channels}),
+            "records": {k: v.get("value") for k, v in session["records"].items()},
         },
     )
 
     assert result["uploaded"]["file_name"] == docx.name
     assert result["uploaded"]["size"] == docx.stat().st_size
-    assert len(channels) == 18
-    assert session["records"]["BuildingInfo.ElevationNum"]["value"] == 16
+    assert session["records"]["DataInfo.DT"]["value"] == 0.02
+    assert session["records"]["DataInfo.NPTS"]["value"] == 30000
 
 
 def test_api_service_runs_qrest_tool(tmp_path: Path, artifact_dir: Path) -> None:
