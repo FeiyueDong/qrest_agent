@@ -83,6 +83,18 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
     assert 'id="missingCount"' in index_html
     assert 'id="conflictCount"' in index_html
 
+    # 可折叠布局：This Turn 移到左侧（消息区与输入框之间），Skills/Artifacts 右侧折叠
+    assert '<details class="panel collapsible turn-panel" id="turnPanel">' in index_html
+    assert '<details class="panel collapsible" id="skillsPanel">' in index_html
+    assert '<details class="panel collapsible" id="artifactsPanel">' in index_html
+    # 折叠面板默认不带 open 属性（折叠时只占一行）
+    assert '<details class="panel collapsible turn-panel" id="turnPanel" open>' not in index_html
+    assert '<details class="panel collapsible" id="skillsPanel" open>' not in index_html
+    # This Turn 位于 composer 之前（左侧），Skills/Artifacts 位于 Fields 之后（右侧底部）
+    assert index_html.index('id="turnPanel"') < index_html.index('id="chatForm"')
+    assert index_html.index('id="recordsTree"') < index_html.index('id="skillsPanel"')
+    assert index_html.index('id="skillsPanel"') < index_html.index('id="artifactsPanel"')
+
     # 旧概念已删除（§42-§44）
     assert "taskLogList" not in index_html
     assert "skill_handlers" not in index_html

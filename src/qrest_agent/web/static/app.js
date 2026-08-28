@@ -282,6 +282,11 @@ function renderAttachmentChips() {
 function renderTurnActivity(turn) {
   if (!turn) return;
   turnBadge.dataset.latest = "1";
+  const actionCount = (turn.actions || []).length;
+  const summaryParts = [turn.intent || "unknown"];
+  if ((turn.skills || []).length) summaryParts.push("skills: " + turn.skills.join(","));
+  summaryParts.push(actionCount + " action" + (actionCount === 1 ? "" : "s"));
+  turnBadge.textContent = summaryParts.join(" · ");
   turnActivity.replaceChildren();
   const rows = [
     {label: "Intent", value: turn.intent || "unknown"},
@@ -308,6 +313,7 @@ function renderTurnActivity(turn) {
       div.append(chips);
     } else {
       const value = document.createElement("div");
+      value.className = "value";
       value.textContent = row.value;
       div.append(value);
     }

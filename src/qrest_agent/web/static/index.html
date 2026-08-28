@@ -20,6 +20,16 @@
 
       <section class="messages" id="messages" aria-live="polite"></section>
 
+      <details class="panel collapsible turn-panel" id="turnPanel">
+        <summary>
+          <span class="panel-title">This Turn</span>
+          <span class="badge" id="turnBadge">尚未有 Agent 回合。</span>
+        </summary>
+        <div class="turn-activity" id="turnActivity">
+          <div class="muted">尚未有 Agent 回合。</div>
+        </div>
+      </details>
+
       <form class="composer" id="chatForm">
         <textarea id="messageInput" placeholder="输入任务或工程描述，例如：请根据这些资料整理当前项目的信息；或：用当前项目状态生成 qREST"></textarea>
         <button class="primary" id="sendButton" type="submit">发送</button>
@@ -59,32 +69,22 @@
         <div class="records-tree" id="recordsTree"></div>
       </section>
 
-      <section class="panel">
-        <div class="panel-header">
-          <h2>This Turn</h2>
-          <span class="muted" id="turnBadge"></span>
-        </div>
-        <div class="turn-activity" id="turnActivity">
-          <div class="muted">尚未有 Agent 回合。</div>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-header">
-          <h2>Skills</h2>
+      <details class="panel collapsible" id="skillsPanel">
+        <summary>
+          <span class="panel-title">Skills</span>
           <span class="muted" id="skillCount"></span>
-        </div>
+        </summary>
         <div class="muted">主 Agent 按任务动态选择 Skill 并加载完整指令。</div>
         <div class="skill-list" id="skillList"></div>
-      </section>
+      </details>
 
-      <section class="panel">
-        <div class="panel-header">
-          <h2>Artifacts</h2>
+      <details class="panel collapsible" id="artifactsPanel">
+        <summary>
+          <span class="panel-title">Artifacts</span>
           <span class="muted" id="artifactCount"></span>
-        </div>
+        </summary>
         <div class="artifact-list" id="artifactList"></div>
-      </section>
+      </details>
     </aside>
   </main>
 
