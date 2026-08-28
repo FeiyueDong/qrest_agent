@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>qREST Agent</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="app">
+    <section class="workspace">
+      <header class="topbar">
+        <h1>qREST Agent</h1>
+        <div class="badges">
+          <span class="badge" id="sessionBadge">session: ...</span>
+          <span class="badge" id="runtimeBadge">runtime: ...</span>
+          <span class="badge" id="readyBadge">ready: ...</span>
+        </div>
+      </header>
+
+      <section class="messages" id="messages" aria-live="polite"></section>
+
+      <form class="composer" id="chatForm">
+        <textarea id="messageInput" placeholder="输入任务或工程描述，例如：请根据这些资料整理当前项目的信息；或：用当前项目状态生成 qREST"></textarea>
+        <button class="primary" id="sendButton" type="submit">发送</button>
+        <div class="composer-tools">
+          <div class="file-actions">
+            <input id="fileInput" type="file" accept=".txt,.md,.json,.pdf,.docx,.xlsx,.csv,.qrest" multiple>
+            <button id="uploadButton" type="button">添加附件</button>
+            <span class="muted" id="attachmentStatus"></span>
+          </div>
+          <div class="export-actions">
+            <button id="exportButton" type="button">导出 metadata.json</button>
+          </div>
+        </div>
+        <div class="attachment-chips" id="attachmentChips"></div>
+      </form>
+    </section>
+
+    <aside class="side">
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Project State</h2>
+          <button id="refreshButton" type="button">刷新</button>
+        </div>
+        <div class="meta-grid">
+          <button class="metric active" data-record-filter="accepted" type="button"><span>已确认</span><strong id="acceptedCount">0</strong></button>
+          <button class="metric" data-record-filter="pending" type="button"><span>待确认</span><strong id="pendingCount">0</strong></button>
+          <button class="metric" data-record-filter="missing" type="button"><span>缺失</span><strong id="missingCount">0</strong></button>
+          <button class="metric" data-record-filter="conflict" type="button"><span>冲突</span><strong id="conflictCount">0</strong></button>
+        </div>
+      </section>
+
+      <section class="panel records-panel">
+        <div class="panel-header">
+          <h2>Fields</h2>
+          <span class="muted" id="fieldCount"></span>
+        </div>
+        <div class="records-tree" id="recordsTree"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>This Turn</h2>
+          <span class="muted" id="turnBadge"></span>
+        </div>
+        <div class="turn-activity" id="turnActivity">
+          <div class="muted">尚未有 Agent 回合。</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Skills</h2>
+          <span class="muted" id="skillCount"></span>
+        </div>
+        <div class="muted">主 Agent 按任务动态选择 Skill 并加载完整指令。</div>
+        <div class="skill-list" id="skillList"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Artifacts</h2>
+          <span class="muted" id="artifactCount"></span>
+        </div>
+        <div class="artifact-list" id="artifactList"></div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

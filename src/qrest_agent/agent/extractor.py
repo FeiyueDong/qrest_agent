@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from qrest_agent.agent.prompts import EXTRACTION_SYSTEM_PROMPT, build_extraction_user_prompt
@@ -22,6 +23,28 @@ _ALLOWED_CANDIDATE_STATUSES = {
 }
 
 
+@dataclass(slots=True)
+class ExtractionContext:
+    """Extraction 的本轮专业上下文（方案 §6/§7/§8）。
+
+    让 Extractor 不再只是“通用 Metadata 抽取器”，而是能感知：
+    - 本轮 intent（如 correction → 用户消息中的替代值应产生 confirmed）；
+    - 本轮选中的 Skills 及其完整指令（约束如何理解与提取）。
+    """
+
+    intent: str = ""
+    selected_skills: list[str] = field(default_factory=list)
+    skill_instructions: list[str] = field(default_factory=list)
+    user_message: str = ""
+
+    def to_prompt_dict(self) -> dict[str, Any]:
+        return {
+            "intent": self.intent,
+            "selected_skills": list(self.selected_skills),
+            "skill_instructions": list(self.skill_instructions),
+        }
+
+
 class LLMExtractor:
     """正式提取路径：LLM + selected Skills 的语义提取（设计文档 §9）。
 
@@ -33,12 +56,20 @@ class LLMExtractor:
     def __init__(self, client: BaseLLMClient) -> None:
         self.client = client
 
-    def extract(self, chunks: list[SourceChunk]) -> list[Candidate]:
+    def extract(
+        self,
+        chunks: list[SourceChunk],
+        context: ExtractionContext | None = None,
+    ) -> list[Candidate]:
         candidates: list[Candidate] = []
+        prompt_context = context.to_prompt_dict() if context is not None else None
         for chunk in chunks:
             messages = [
                 {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-                {"role": "user", "content": build_extraction_user_prompt(chunk.text)},
+                {
+                    "role": "user",
+                    "content": build_extraction_user_prompt(chunk.text, prompt_context),
+                },
             ]
             result = self.client.complete_json(messages)
             for item in result.get("candidates", []):
@@ -46,8 +77,10 @@ class LLMExtractor:
                 if candidate is None:
                     continue
                 validated = _validate_llm_candidate(candidate, chunk)
-                if validated is not None:
-                    candidates.append(validated)
+                if validated is None:
+                    continue
+                _apply_correction_promotion(validated, chunk, context)
+                candidates.append(validated)
         return candidates
 
 
@@ -57,7 +90,12 @@ class RuleBasedExtractor:
     只保留通用字段模式，不包含任何项目特定解析逻辑。
     """
 
-    def extract(self, chunks: list[SourceChunk]) -> list[Candidate]:
+    def extract(
+        self,
+        chunks: list[SourceChunk],
+        context: ExtractionContext | None = None,
+    ) -> list[Candidate]:
+        # 规则兜底只做通用模式提取；correction 语义只适用于 LLM 路径。
         candidates: list[Candidate] = []
         for chunk in chunks:
             candidates.extend(_extract_from_json(chunk))
@@ -170,6 +208,29 @@ def _validate_llm_candidate(candidate: Candidate, chunk: SourceChunk) -> Candida
             candidate.status = "uncertain"
             candidate.confidence = min(candidate.confidence, 0.4)
     return candidate
+
+
+def _apply_correction_promotion(
+    candidate: Candidate,
+    chunk: SourceChunk,
+    context: ExtractionContext | None,
+) -> None:
+    """方案 §8：correction 语义必须可靠产生 confirmed。
+
+    条件（全部满足）：
+    - 本轮 intent == correction；
+    - 来源是用户消息（chat）；
+    - 候选已通过证据校验（仍是 extracted）且给出非空替代值。
+    此时 extracted → confirmed（用户明确给出的替代值，等同确认）。
+    """
+    if context is None or context.intent != "correction":
+        return
+    if chunk.source_type != "chat":
+        return
+    if candidate.status != "extracted" or candidate.value is None:
+        return
+    candidate.status = "confirmed"
+    candidate.confidence = max(candidate.confidence, 1.0)
 
 
 def _normalize_evidence_text(text: str) -> str:

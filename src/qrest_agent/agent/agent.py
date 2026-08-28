@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from qrest_agent.agent.extractor import LLMExtractor, RuleBasedExtractor
+from qrest_agent.agent.extractor import ExtractionContext, LLMExtractor, RuleBasedExtractor
 from qrest_agent.agent.planner import ActionSpec, AgentPlanner, TurnPlan
 from qrest_agent.agent.prompts import AGENT_SYSTEM_PROMPT
 from qrest_agent.agent.responder import Responder
@@ -58,6 +58,54 @@ class TurnResult:
             "tool_results": list(self.tool_results),
             "action_results": dict(self.action_results),
         }
+
+
+@dataclass(slots=True)
+class InputSourceSummary:
+    """本轮输入资料的摘要（方案 §17/§18）：只让 Planner 知道“用户给了什么”。"""
+
+    source_id: str
+    source_type: str
+    name: str
+    chunk_count: int
+    preview: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_id": self.source_id,
+            "source_type": self.source_type,
+            "name": self.name,
+            "chunk_count": self.chunk_count,
+            "preview": self.preview,
+        }
+
+
+def _summarize_input_sources(chunks: list[SourceChunk], max_preview_chars: int = 400) -> list[InputSourceSummary]:
+    """按 source_id 聚合 chunk 为输入摘要；预览只截取前 max_preview_chars 字符（§18）。"""
+    grouped: dict[str, list[SourceChunk]] = {}
+    order: list[str] = []
+    for chunk in chunks:
+        if chunk.source_id not in grouped:
+            grouped[chunk.source_id] = []
+            order.append(chunk.source_id)
+        grouped[chunk.source_id].append(chunk)
+
+    summaries: list[InputSourceSummary] = []
+    for source_id in order:
+        source_chunks = grouped[source_id]
+        preview = "\n".join(chunk.text for chunk in source_chunks if chunk.text.strip())
+        if len(preview) > max_preview_chars:
+            preview = preview[:max_preview_chars] + "…"
+        summaries.append(
+            InputSourceSummary(
+                source_id=source_id,
+                source_type=source_chunks[0].source_type if source_chunks else "text",
+                name=source_id,
+                chunk_count=len(source_chunks),
+                preview=preview,
+            )
+        )
+    return summaries
 
 
 class QrestAgent:
@@ -123,6 +171,7 @@ class QrestAgent:
         return {
             "user_message": text,
             "session_id": self.session_id,
+            "input_sources": [item.to_dict() for item in _summarize_input_sources(chunks)],
             "known_fields": known,
             "missing_required": report.missing_required,
             "missing_important": report.missing_important,
@@ -142,26 +191,56 @@ class QrestAgent:
         derivation_results: list[dict[str, Any]],
         plan: TurnPlan,
     ) -> dict[str, Any]:
+        """严格分类的 Trusted Context（方案 §11-§15）。
+
+        - accepted_facts：只含 Working State 合并后的可导出状态
+          （confirmed / extracted / derived），不含原始候选（候选可能被拒绝/降级/冲突）；
+        - uncertain / inferred：单独分类，禁止被当作“已知”；
+        - requested_inputs：本轮 ask Action 的结构化请求；
+        - tool_results：工具执行结果（含失败，§29）。
+        """
+        accepted: list[dict[str, Any]] = []
+        uncertain: list[dict[str, Any]] = []
+        inferred: list[dict[str, Any]] = []
+        for path, state in self.working_state.fields.items():
+            if state.value is None:
+                continue
+            if state.status in EXPORTABLE_STATUSES:
+                accepted.append({"field": path, "value": state.value, "status": state.status})
+            elif state.status == "uncertain":
+                uncertain.append(_state_entry(state, reason="source ambiguous"))
+            elif state.status == "inferred":
+                inferred.append(_state_entry(state, reason="engineering assumption"))
+
         new_facts = [
             f"{candidate.field_path} = {candidate.value}（{candidate.status}）"
             for candidate in candidates
-            if candidate.value is not None
+            if candidate.value is not None and candidate.status in EXPORTABLE_STATUSES
         ]
+        ask = action_results.get("ask")
+        requested_inputs = [ask] if isinstance(ask, dict) else []
+
+        tool_results: list[dict[str, Any]] = list(derivation_results)
+        for name, payload in action_results.items():
+            if name.startswith("tool:"):
+                tool_results.append({"tool": name.removeprefix("tool:"), "output": payload})
+
         return {
             "user_message": text,
             "intent": plan.intent,
             "plan_reason": plan.reason,
             "new_facts": new_facts,
-            "missing_required": report.missing_required,
-            "missing_important": report.missing_important,
-            "conflicts": report.conflicts,
-            "known_fields": {
-                path: {"value": state.value, "status": state.status}
-                for path, state in self.working_state.fields.items()
-                if state.value is not None
-            },
+            "accepted_facts": accepted,
+            "uncertain": uncertain,
+            "inferred": inferred,
+            "conflicts": list(report.conflicts),
+            "missing_required": list(report.missing_required),
+            "missing_important": list(report.missing_important),
+            "requested_inputs": requested_inputs,
+            "tool_results": tool_results,
             "action_results": action_results,
             "derivation_results": derivation_results,
+            "recent_conversation": list(self._conversation),
             "report_ready": report.ready,
         }
 
@@ -192,12 +271,19 @@ class QrestAgent:
         trusted = self.build_trusted_context(text or "", candidates, report, action_results, derivation_results, plan)
         response = self.responder.respond(trusted)
 
-        # 11. persist conversation memory（摘要形式：意图 + 新事实 + 回复截断）
+        # 11. persist conversation memory（§17/§27：意图 + 已接受事实摘要 + 回复截断）
+        accepted_summary = [
+            f"{item['field']} = {item['value']}"
+            for item in trusted.get("accepted_facts", [])
+            if item.get("value") is not None
+        ][:5]
         self._conversation.append(
             {
                 "user": (text or "")[:200],
                 "intent": plan.intent,
-                "new_facts": [fact for fact in trusted.get("new_facts", [])][:5],
+                "new_facts": accepted_summary,
+                "accepted_facts": accepted_summary,
+                "assistant_summary": response[:200],
                 "response": response[:200],
             }
         )
@@ -248,7 +334,7 @@ class QrestAgent:
                             action_results.setdefault("extract_errors", []).append(str(exc))
                 if not pending:
                     continue
-                turn_candidates, extractor_name, fallback_reason = self._extract(pending)
+                turn_candidates, extractor_name, fallback_reason = self._extract(pending, plan, text)
                 candidates.extend(turn_candidates)
                 # 所有提取结果先进入 Working State（设计文档 §3.5：唯一事实中心）
                 self.working_state.submit_all(turn_candidates)
@@ -281,7 +367,16 @@ class QrestAgent:
                     path = self.tools.artifacts.write_json(session_dir, "metadata.json", export.metadata)
                     payload["metadata_json"] = str(path)
                 action_results["export"] = payload
-            elif action.type in {"ask", "respond"}:
+            elif action.type == "ask":
+                # 方案 §20-§22：ask 必须携带结构化请求并进入 action_results/requested_inputs
+                arguments = action.arguments if isinstance(action.arguments, dict) else {}
+                action_results["ask"] = {
+                    "reason": str(arguments.get("reason") or "missing_required_input"),
+                    "request": str(arguments.get("request") or _default_ask_request(report := validate_state(self.working_state))),
+                    "expected": str(arguments.get("expected") or "user_input"),
+                }
+                break
+            elif action.type == "respond":
                 break
         return candidates, action_results, extractor_name, fallback_reason
 
@@ -422,12 +517,25 @@ class QrestAgent:
 
         return results
 
-    def _extract(self, chunks: list[SourceChunk]) -> tuple[list[Candidate], str, str | None]:
-        """正式路径 LLM-only；LLM 失败/无结果时规则兜底（设计文档 §9）。"""
+    def _extract(
+        self,
+        chunks: list[SourceChunk],
+        plan: TurnPlan,
+        text: str,
+    ) -> tuple[list[Candidate], str, str | None]:
+        """正式路径 LLM-only（携带本轮 intent + selected Skills，方案 §6-§10）；
+        LLM 失败/无结果时规则兜底（设计文档 §9）。
+        """
+        extraction_context = ExtractionContext(
+            intent=plan.intent,
+            selected_skills=list(plan.skills),
+            skill_instructions=_load_skill_instructions(self.skills, plan.skills),
+            user_message=text,
+        )
         if isinstance(self.extractor, LLMExtractor):
             fallback_reason: str | None = None
             try:
-                llm_candidates = self.extractor.extract(chunks)
+                llm_candidates = self.extractor.extract(chunks, context=extraction_context)
             except Exception as exc:
                 fallback_reason = f"LLM extraction failed: {exc}"
                 llm_candidates = []
@@ -442,6 +550,26 @@ class QrestAgent:
             return RuleBasedExtractor().extract(chunks), "rule", None
         except Exception as exc:
             return [], "rule", f"rule extraction failed: {exc}"
+
+
+def _state_entry(state: Any, reason: str) -> dict[str, Any]:
+    return {"field": state.field_path, "value": state.value, "status": state.status, "reason": reason}
+
+
+def _default_ask_request(report: ValidationReport) -> str:
+    if report.missing_required:
+        return "请补充缺失的必要信息：" + "、".join(report.missing_required[:6])
+    return "请补充必要的信息以继续"
+
+
+def _load_skill_instructions(skills: SkillRegistry, names: list[str]) -> list[str]:
+    instructions: list[str] = []
+    for name in names:
+        try:
+            instructions.append(skills.load(name).instructions)
+        except KeyError:
+            continue
+    return instructions
 
 
 def _to_json(data: dict[str, Any]) -> str:

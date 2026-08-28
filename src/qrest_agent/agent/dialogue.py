@@ -29,6 +29,10 @@ class DialogueResult:
     candidates: list[Candidate] = field(default_factory=list)
     command: str | None = None
     tool_result: dict[str, Any] | None = None
+    plan: dict[str, Any] | None = None
+    extractor: str | None = None
+    fallback_reason: str | None = None
+    turn: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -37,6 +41,10 @@ class DialogueResult:
             "candidates": [item.to_dict() for item in self.candidates],
             "command": self.command,
             "tool_result": self.tool_result,
+            "plan": self.plan,
+            "extractor": self.extractor,
+            "fallback_reason": self.fallback_reason,
+            "turn": self.turn,
         }
 
 
@@ -58,22 +66,53 @@ class ChatSession:
         self.session_id = session_id
         self.runtime_info = runtime_info or {"provider": "rule", "model": None, "extractor": "rule"}
         self.turns: list[DialogueTurn] = []
+        # 附件模型（方案 §45-§48/§55）：upload 只登记为 pending，随消息一起发送才进入 Agent
+        self.attachments: dict[str, dict[str, Any]] = {}
+        self.last_turn: dict[str, Any] | None = None
 
-    def handle(self, message: str) -> DialogueResult:
+    def add_attachment(self, name: str, path: str, size: int | None = None) -> str:
+        attachment_id = f"att-{len(self.attachments) + 1}"
+        self.attachments[attachment_id] = {
+            "attachment_id": attachment_id,
+            "name": name,
+            "path": path,
+            "size": size,
+            "status": "pending",
+        }
+        return attachment_id
+
+    def mark_attachments_used(self, attachment_ids: list[str]) -> None:
+        for attachment_id in attachment_ids:
+            attachment = self.attachments.get(attachment_id)
+            if attachment is not None:
+                attachment["status"] = "used"
+
+    def handle(self, message: str, files: list[str] | None = None) -> DialogueResult:
         text = message.strip()
-        self.turns.append(DialogueTurn(role="user", text=message))
+        self.turns.append(
+            DialogueTurn(
+                role="user",
+                text=message,
+                payload={"files": [str(item) for item in files or []]},
+            )
+        )
         if not text:
             result = self._command_help()
         elif text.startswith("/"):
             result = self._handle_command(text)
         else:
-            turn_result = self.agent.run_turn(text=text)
+            turn_result = self.agent.run_turn(text=text, files=files)
             result = DialogueResult(
                 response=turn_result.response,
                 report=turn_result.report,
                 candidates=turn_result.candidates,
                 tool_result=turn_result.action_results or None,
+                plan=turn_result.plan.to_dict() if turn_result.plan is not None else None,
+                extractor=turn_result.extractor,
+                fallback_reason=turn_result.fallback_reason,
+                turn=_turn_summary(turn_result),
             )
+            self.last_turn = result.turn
 
         self.turns.append(DialogueTurn(role="assistant", text=result.response, payload=result.to_dict()))
         return result
@@ -85,7 +124,12 @@ class ChatSession:
             response=turn_result.response,
             report=turn_result.report,
             candidates=turn_result.candidates,
+            plan=turn_result.plan.to_dict() if turn_result.plan is not None else None,
+            extractor=turn_result.extractor,
+            fallback_reason=turn_result.fallback_reason,
+            turn=_turn_summary(turn_result),
         )
+        self.last_turn = result.turn
         self.turns.append(DialogueTurn(role="assistant", text=result.response, payload=result.to_dict()))
         return result
 
@@ -108,8 +152,8 @@ class ChatSession:
                 }
                 for skill in skills
             ],
-            "skill_handlers": self.agent.skills.list_names(),
-            "task_logs": [item for item in artifacts if item["name"].endswith("_task_log.json")],
+            "attachments": [dict(item) for item in self.attachments.values()],
+            "last_turn": self.last_turn,
             "turns": [turn.to_dict() for turn in self.turns],
         }
 
@@ -267,6 +311,19 @@ class ChatSession:
 
     def _command_result(self, response: str, command: str | None = None) -> DialogueResult:
         return DialogueResult(response=response, report=validate_state(self.agent.working_state), command=command)
+
+
+def _turn_summary(turn: TurnResult) -> dict[str, Any]:
+    """方案 §41/§54：结构化 Turn 摘要（intent / skills / actions / tools / extractor）。"""
+    plan = turn.plan
+    return {
+        "intent": plan.intent if plan is not None else "unknown",
+        "skills": list(plan.skills) if plan is not None else [],
+        "actions": [action.to_dict() for action in plan.actions] if plan is not None else [],
+        "tools": [action.tool for action in plan.actions if action.type == "tool" and action.tool] if plan is not None else [],
+        "extractor": turn.extractor,
+        "fallback_reason": turn.fallback_reason,
+    }
 
 
 def _format_candidates(candidates: list[Candidate]) -> str:

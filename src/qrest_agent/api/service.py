@@ -40,26 +40,48 @@ class ApiService:
         return self._session(session_id).to_dict()
 
     def chat(self, session_id: str, message: str) -> dict[str, Any]:
-        result = self._session(session_id).handle(message)
-        return result.to_dict()
+        return self.turn(session_id, message, attachments=None)
 
     def upload_text(self, session_id: str, file_name: str, text: str) -> dict[str, Any]:
+        """方案 §48：upload 只保存文件并登记 pending attachment，不立即触发 Agent Turn。"""
         session = self._session(session_id)
         path = self.artifacts.path(session_id, "uploads", file_name)
         path.write_text(text, encoding="utf-8")
-        result = session.handle_file(str(path))
-        payload = result.to_dict()
-        payload["uploaded"] = {"file_name": file_name, "path": str(path)}
-        return payload
+        attachment_id = session.add_attachment(file_name, str(path), size=len(text.encode("utf-8")))
+        return {
+            "attachment_id": attachment_id,
+            "name": file_name,
+            "path": str(path),
+            "size": len(text.encode("utf-8")),
+            "status": "pending",
+        }
 
     def upload_file_bytes(self, session_id: str, file_name: str, data: bytes) -> dict[str, Any]:
+        """方案 §48：upload 只保存文件并登记 pending attachment，不立即触发 Agent Turn。"""
         session = self._session(session_id)
         path = self.artifacts.path(session_id, "uploads", file_name)
         path.write_bytes(data)
-        result = session.handle_file(str(path))
-        payload = result.to_dict()
-        payload["uploaded"] = {"file_name": file_name, "path": str(path), "size": len(data)}
-        return payload
+        attachment_id = session.add_attachment(file_name, str(path), size=len(data))
+        return {
+            "attachment_id": attachment_id,
+            "name": file_name,
+            "path": str(path),
+            "size": len(data),
+            "status": "pending",
+        }
+
+    def turn(self, session_id: str, message: str, attachments: list[str] | None = None) -> dict[str, Any]:
+        """方案 §47：统一 Turn = message + attachments（附件随消息一起进入 Agent）。"""
+        session = self._session(session_id)
+        files: list[str] = []
+        for attachment_id in attachments or []:
+            attachment = session.attachments.get(attachment_id)
+            if attachment is None:
+                raise KeyError(f"unknown attachment: {attachment_id}")
+            files.append(attachment["path"])
+        session.mark_attachments_used(attachments or [])
+        result = session.handle(message, files=files or None)
+        return result.to_dict()
 
     def run_tool(self, session_id: str, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         session = self._session(session_id)

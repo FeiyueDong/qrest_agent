@@ -1,3 +1,5 @@
+from typing import Any
+
 from qrest_agent.core.schema import QREST_REQUIRED_PATHS
 
 ALLOWED_FIELD_PATHS_TEXT = "\n".join(f"- {path}" for path in QREST_REQUIRED_PATHS)
@@ -107,9 +109,23 @@ AGENT_PLANNING_PROMPT = """你是 qREST 主 Agent 的规划步骤。给定用户
 """.strip()
 
 
-def build_extraction_user_prompt(text: str) -> str:
+def build_extraction_user_prompt(text: str, context: dict[str, Any] | None = None) -> str:
+    """构造 Extraction 用户消息：稳定指令 + 本轮 intent + 相关 Skill 指令 + 来源文本（§6/§7）。"""
+    parts: list[str] = []
+    if context:
+        intent = context.get("intent")
+        if intent:
+            parts.append(f"Intent:\n{intent}")
+        selected_skills = context.get("selected_skills") or []
+        if selected_skills:
+            parts.append("Relevant skills:\n" + "\n".join(f"- {name}" for name in selected_skills))
+        skill_instructions = context.get("skill_instructions") or []
+        if skill_instructions:
+            parts.append("Skill instructions:\n" + "\n\n".join(f"- {item}" for item in skill_instructions))
+    parts.append("Source:\n" + text)
     return (
         "Extract qREST metadata candidates from this source text. "
-        "If a field is not explicitly supported by the text, omit it instead of guessing.\n\n"
-        f"{text}"
+        "If a field is not explicitly supported by the text, omit it instead of guessing. "
+        "Follow the Intent and Skill instructions above when they apply.\n\n"
+        + "\n\n".join(parts)
     )

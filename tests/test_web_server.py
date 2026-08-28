@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from qrest_agent.api.service import ApiService
+from qrest_agent.core.models import Candidate, Evidence
 from qrest_agent.resources import qrest_examples_root
 from qrest_agent.web.server import WebServerState, _make_handler
 from tests.conftest import write_json, write_text
@@ -18,13 +19,9 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
     handler = _make_handler(WebServerState(service))
 
     index_html = _request_text(handler, "/")
+    app_js = _request_text(handler, "/app.js")
+    style_css = _request_text(handler, "/style.css")
     created = _request_json(handler, "/api/sessions", method="POST", payload={"session_id": "web-session"})
-    chat = _request_json(
-        handler,
-        "/api/chat",
-        method="POST",
-        payload={"session_id": "web-session", "message": "项目名称为 WebDemo，采样间隔为 0.02s。"},
-    )
     upload = _request_json(
         handler,
         "/api/upload",
@@ -35,13 +32,14 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
             "content_base64": base64.b64encode("事件名称为 WEB_EVENT。数据点数：30000。".encode("utf-8")).decode("ascii"),
         },
     )
-    task = _request_json(
+    turn = _request_json(
         handler,
-        "/api/chat",
+        "/api/turn",
         method="POST",
         payload={
             "session_id": "web-session",
-            "message": f"解析 {qrest_examples_root() / 'kunming2' / 'kunming2.qrest'} 并导入当前项目",
+            "message": "请根据这些资料整理当前项目的信息",
+            "attachments": [upload["attachment_id"]],
         },
     )
     export = _request_json(
@@ -58,48 +56,98 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
         artifact_dir / "web" / "server_smoke_flow.json",
         {
             "created": created,
-            "chat": chat,
             "upload": upload,
-            "task": task,
+            "turn": turn,
             "export": export,
             "session": session,
             "artifacts": artifacts,
         },
     )
 
+    # 静态资源拆分（§50-§53）
     assert "qREST Agent" in index_html
-    assert 'id="recordsTree"' in index_html
-    assert 'id="skillList"' in index_html
-    assert 'id="taskLogList"' in index_html
-    assert "自然语言任务由主 Agent 自主处理" in index_html
-    assert "检查 metadata.json 和 data.txt 能不能生成 qREST" in index_html
-    assert 'data-record-filter="known"' in index_html
-    assert 'data-record-filter="missing"' in index_html
-    assert 'data-record-filter="conflict"' in index_html
-    assert 'id="missingList"' not in index_html
-    assert 'id="fileInput"' in index_html
-    assert 'id="uploadButton"' in index_html
-    assert 'id="exportButton"' in index_html
-    assert "文件与产物" not in index_html
-    assert "files-artifacts-panel" not in index_html
-    assert "artifactList" not in index_html
-    assert "artifactPreview" not in index_html
-    assert "uploadStatus" not in index_html
-    assert "function renderArtifacts" not in index_html
-    assert "function buildRecordTree" in index_html
-    assert created["session_id"] == "web-session"
-    assert any(item["name"] == "qrest_data_generation" for item in created["skills"])
-    assert "qrest_data_loading" in created["skill_handlers"]
-    assert "BuildingInfo.ProjectName" in session["records"]
+    assert '<link rel="stylesheet" href="/style.css">' in index_html
+    assert '<script src="/app.js"></script>' in index_html
+    assert "recordsTree" in app_js
+    assert "collectRecordSets" in app_js
+    assert "turnActivity" in index_html
+    assert "artifactList" in index_html
+    assert "attachmentChips" in index_html
+    assert ".messages" in style_css
+
+    # 新状态模型（§34-§35）：已确认 / 待确认 / 缺失 / 冲突
+    for key in ("accepted", "pending", "missing", "conflict"):
+        assert f'data-record-filter="{key}"' in index_html
+    assert 'id="acceptedCount"' in index_html
+    assert 'id="pendingCount"' in index_html
+    assert 'id="missingCount"' in index_html
+    assert 'id="conflictCount"' in index_html
+
+    # 旧概念已删除（§42-§44）
+    assert "taskLogList" not in index_html
+    assert "skill_handlers" not in index_html
+    assert "task_logs" not in index_html
+    assert "skill_handlers" not in app_js
+    assert "task_logs" not in app_js
+    assert "task-log" not in style_css
+
+    # upload 只登记 pending，turn 携带附件后 Agent 使用
+    assert upload["status"] == "pending"
+    assert upload["attachment_id"]
+    assert turn["turn"]["intent"] == "collect_metadata"
+    assert turn["turn"]["skills"]
+    assert session["attachments"][0]["status"] == "used"
+    assert "DataInfo.EventName" in session["records"]
+    assert session["records"]["DataInfo.EventName"]["value"] == "WEB_EVENT"
+    assert "skill_handlers" not in session
+    assert "task_logs" not in session
+    assert session["last_turn"]["intent"] == "collect_metadata"
     assert "skills" in session
-    assert "skill_handlers" in session
-    assert "task_logs" in session
-    assert upload["uploaded"]["file_name"] == "web_note.txt"
-    assert task["tool_result"]["tool:load_qrest"]["ok"] is True
-    assert isinstance(session["task_logs"], list)
     assert not export["ok"]
     assert any(item["name"] == "metadata_export_report.json" for item in artifacts["artifacts"])
     assert any(item["name"] == "uploads/web_note.txt" for item in artifacts["artifacts"])
+
+
+def test_web_server_state_statuses_are_separated(tmp_path: Path, artifact_dir: Path) -> None:
+    """方案 §62：confirmed/extracted/derived 与 uncertain/inferred/missing/conflict 分类正确。"""
+    service = ApiService(artifact_root=tmp_path / "web_artifacts")
+    service.create_session("status-session")
+    session = service._session("status-session")
+    evidence = [Evidence(source_id="doc", text="evidence")]
+    for candidate in [
+        Candidate(field_path="BuildingInfo.ProjectName", value="Demo", status="confirmed", evidence=evidence),
+        Candidate(field_path="BuildingInfo.StructuralType", value="RCFrame", status="extracted", evidence=evidence),
+        Candidate(field_path="BuildingInfo.ElevationNum", value=3, status="derived", evidence=evidence, confidence=1.0),
+        Candidate(field_path="BuildingInfo.GeoLocation.NorthAngle", value=15.0, status="uncertain", evidence=evidence),
+        Candidate(field_path="BuildingInfo.StructuralFootprint.Shape", value="Rect", status="inferred", evidence=evidence),
+        Candidate(field_path="BuildingInfo.Elevation", value=None, status="missing"),
+        Candidate(field_path="BuildingInfo.StructuralFootprint.Parameters", value={"Length": 42.0}, status="extracted", evidence=evidence),
+        Candidate(field_path="BuildingInfo.StructuralFootprint.Parameters", value={"Length": 46.9}, status="extracted", evidence=evidence),
+    ]:
+        session.agent.working_state.submit(candidate)
+
+    payload = service.get_session("status-session")
+    records = payload["records"]
+
+    write_json(artifact_dir / "web" / "status_classification.json", payload)
+
+    accepted = {path for path, record in records.items() if record["status"] in {"confirmed", "extracted", "derived"}}
+    pending = {path for path, record in records.items() if record["status"] in {"uncertain", "inferred"}}
+    missing = set(payload["report"]["missing_required"])
+    conflicts = set(payload["report"]["conflicts"])
+
+    assert "BuildingInfo.ProjectName" in accepted
+    assert "BuildingInfo.StructuralType" in accepted
+    assert "BuildingInfo.ElevationNum" in accepted
+    assert "BuildingInfo.GeoLocation.NorthAngle" in pending
+    assert "BuildingInfo.StructuralFootprint.Shape" in pending
+    assert "BuildingInfo.GeoLocation.NorthAngle" not in accepted
+    assert "BuildingInfo.StructuralFootprint.Shape" not in accepted
+    assert "BuildingInfo.Elevation" in missing or "BuildingInfo.ElevationNum" in missing
+    assert "BuildingInfo.StructuralFootprint.Parameters" in conflicts
+    # inferred 不得进入可导出 metadata
+    metadata = session.agent.to_metadata()
+    assert "StructuralFootprint" not in metadata.get("BuildingInfo", {}) or "Shape" not in metadata["BuildingInfo"]["StructuralFootprint"]
 
 
 def _request_json(

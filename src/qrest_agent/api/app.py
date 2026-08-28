@@ -28,6 +28,17 @@ def create_app(service: ApiService | None = None) -> Any:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @app.post("/sessions/{session_id}/turn")
+    def turn(session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return api.turn(
+                session_id,
+                str(payload.get("message", "")),
+                payload.get("attachments"),
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.post("/sessions/{session_id}/chat")
     def chat(session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:

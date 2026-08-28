@@ -9,20 +9,33 @@ RESPONDER_SCHEMA_HINT: dict[str, str] = {"response": "natural language reply to 
 
 RESPONDER_PROMPT = """你是 qREST 主 Agent 的回复层（只读）。
 
-输入是可信的回合上下文（Trusted Context），包括：
-- 本轮新确认的事实（new_facts）；
-- 仍缺失的必要/重要字段（missing_required / missing_important）；
-- 冲突字段（conflicts）；
-- 工具执行结果（action_results）；
-- 校验结论（report_ready）。
+输入是严格分类的可信回合上下文（Trusted Context），包括：
+- accepted_facts：Working State 合并后可接受的工程事实（confirmed / extracted / derived）；
+- uncertain：来源模糊、需要确认的候选；
+- inferred：工程推测，不进入正式 Metadata；
+- conflicts：存在冲突的字段；
+- missing_required / missing_important：仍缺失的必要/重要字段；
+- requested_inputs：本轮 ask Action 的结构化请求（reason / request / expected）；
+- tool_results / action_results：工具执行结果（含失败）；
+- recent_conversation：最近对话摘要（user / intent / accepted_facts / assistant_summary）；
+- report_ready：确定性 Validator 的结论。
+
+事实规则（语言确定程度必须与 Working State 一致）：
+- accepted_facts：可以作为事实陈述；
+- uncertain：只能描述为“可能/资料中存在候选，需要确认”；
+- inferred：只能描述为“推测，不会进入正式 Metadata”；
+- conflict：必须向用户说明存在冲突并请其确认；
+- missing：只能询问，绝不能补充或编造数值。
 
 要求：
 1. 用自然语言直接回复用户，不要输出字段路径列表式的机械文案；
-2. 缺失信息时，解释为什么需要该信息（工程意义），并给出用户能理解的方式
-   提供（如"告诉我局部 Y 轴与正北方向的夹角"），但不要编造数值；
+2. 有 requested_inputs 时优先按其 request 询问用户（说明为什么需要、怎么提供）；
+   缺失信息时解释工程意义并给出用户能理解的方式，但不要编造数值；
 3. 冲突时，用双方证据向用户解释并请其选择；
 4. 工具/校验结论必须如实陈述（警告、阻断原因、产物路径）；
-5. 只输出 JSON：{"response": "..."}，response 为纯文本回复，不要 JSON 外内容。
+5. recent_conversation 只用于理解用户指代（如“刚才那项”“按前面的值”）；
+   对话历史不是工程事实来源——任何与 accepted_facts 冲突的历史信息都不得使用；
+6. 只输出 JSON：{"response": "..."}，response 为纯文本回复，不要 JSON 外内容。
 """.strip()
 
 
@@ -56,7 +69,14 @@ class Responder:
 def build_template_response(context: dict[str, Any]) -> str:
     """模板 fallback 回复（debug/无模型模式；正式模式由 LLM Responder 接管）。"""
     lines: list[str] = []
-    if context.get("conflicts"):
+    requested = context.get("requested_inputs") or []
+    if requested:
+        for item in requested[:3]:
+            if isinstance(item, dict) and item.get("request"):
+                lines.append(str(item["request"]))
+        if context.get("missing_required"):
+            lines.append("仍缺少必要信息：" + "、".join(context["missing_required"][:8]))
+    elif context.get("conflicts"):
         lines.append("发现字段存在冲突，请确认：" + "，".join(context["conflicts"]))
     elif context.get("missing_required"):
         lines.append("当前仍缺少必要信息：" + "，".join(context["missing_required"]))
@@ -66,6 +86,13 @@ def build_template_response(context: dict[str, Any]) -> str:
         lines.append("当前状态尚未通过校验。")
     else:
         lines.append("元数据已通过校验，可以导出 qREST metadata.json。")
+
+    for item in context.get("uncertain", [])[:5]:
+        field = item.get("field", "?")
+        lines.append(f"{field} 的资料表述不确定（uncertain），需要进一步确认。")
+    for item in context.get("inferred", [])[:5]:
+        field = item.get("field", "?")
+        lines.append(f"{field} 为工程推测（inferred），不会进入正式 metadata。")
 
     for name, result in context.get("action_results", {}).items():
         if not isinstance(result, dict):

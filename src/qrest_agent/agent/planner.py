@@ -148,6 +148,17 @@ def _qrest_rule_plan(intent: TaskIntent, context: dict[str, Any]) -> TurnPlan:
         actions.append(ActionSpec(type="export", arguments={}))
         metadata_source = "$export.metadata_json"
     if intent.data_txt is None:
+        # 方案 §20-§24：ask 必须结构化（原因 + 请求 + 期望形式），并终止本轮后续执行
+        actions.append(
+            ActionSpec(
+                type="ask",
+                arguments={
+                    "reason": "missing_data_txt",
+                    "request": "请提供用于生成 qREST 的时程数据文件 data.txt（文件路径或上传附件）",
+                    "expected": "path_or_attachment",
+                },
+            )
+        )
         return TurnPlan(
             intent="qrest_task",
             skills=["qrest_data"],
@@ -220,7 +231,8 @@ AGENT_ACTION_PROMPT = """你是 qREST 主 Agent 的规划步骤。你已经阅�
 生成本轮动作列表，基础动作只允许：
 - extract：从用户消息/文件提取候选事实（evidence 必须来自资料原文）；
 - tool：调用已注册 Tool（输入必须来自用户消息或当前状态，禁止编造）；
-- ask：需要用户补充信息（如缺失的必要字段、文件路径）；
+- ask：需要用户补充信息；arguments 必须带 reason（为什么缺）、request（要什么、
+  用自然语言）、expected（期望形式，如 path_or_attachment / value / file）；
 - respond：基于当前可信状态直接回复；
 - export：按导出策略从 Working State 生成 metadata（写 artifacts/metadata.json）。
 
@@ -271,6 +283,7 @@ def _action_planning_messages(
 def _compact_state(context: dict[str, Any]) -> dict[str, Any]:
     return {
         "known_fields": context.get("known_fields", {}),
+        "input_sources": context.get("input_sources", []),
         "missing_required": context.get("missing_required", []),
         "missing_important": context.get("missing_important", []),
         "conflicts": context.get("conflicts", []),

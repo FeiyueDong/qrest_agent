@@ -82,7 +82,17 @@ def test_rule_plan_generation_without_data_asks_user() -> None:
 
     assert plan.intent == "qrest_task"
     assert plan.need_user_input is True
-    assert plan.actions == [ActionSpec(type="export", arguments={})]
+    assert plan.actions == [
+        ActionSpec(type="export", arguments={}),
+        ActionSpec(
+            type="ask",
+            arguments={
+                "reason": "missing_data_txt",
+                "request": "请提供用于生成 qREST 的时程数据文件 data.txt（文件路径或上传附件）",
+                "expected": "path_or_attachment",
+            },
+        ),
+    ]
 
 
 def test_rule_plan_falls_back_to_collect_metadata_for_plain_text() -> None:

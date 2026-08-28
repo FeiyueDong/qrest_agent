@@ -14,7 +14,11 @@ def test_api_service_chat_upload_and_artifacts(tmp_path: Path, artifact_dir: Pat
 
     created = service.create_session("api-session")
     chat = service.chat("api-session", "项目名称为 DemoApi。采样间隔为 0.02s。")
+    # upload 只保存为 pending attachment，不触发 Agent Turn（方案 §48）
     upload = service.upload_text("api-session", "event.txt", "事件名称为 API_EVENT。数据点数：30000。")
+    session_before = service.get_session("api-session")
+    turn = service.turn("api-session", "请整理这些资料", [upload["attachment_id"]])
+    session_after = service.get_session("api-session")
     artifacts = service.list_artifacts("api-session")
     preview = service.read_artifact_text("api-session", "uploads/event.txt")
 
@@ -24,6 +28,8 @@ def test_api_service_chat_upload_and_artifacts(tmp_path: Path, artifact_dir: Pat
             "created": created,
             "chat": chat,
             "upload": upload,
+            "turn": turn,
+            "session_after": session_after,
             "artifacts": artifacts,
             "preview": preview,
         },
@@ -31,7 +37,15 @@ def test_api_service_chat_upload_and_artifacts(tmp_path: Path, artifact_dir: Pat
 
     assert created["session_id"] == "api-session"
     assert "BuildingInfo.ProjectName" in service.get_session("api-session")["records"]
-    assert upload["uploaded"]["path"].endswith("event.txt")
+    assert upload["attachment_id"]
+    assert upload["status"] == "pending"
+    # upload 本身不触发提取：EventName 尚未进入状态
+    assert session_before["records"].get("DataInfo.EventName") is None
+    # turn 携带附件后 Agent 真正处理
+    assert session_after["records"]["DataInfo.EventName"]["value"] == "API_EVENT"
+    assert session_after["attachments"][0]["status"] == "used"
+    assert turn["turn"]["intent"] == "collect_metadata"
+    assert turn["turn"]["skills"]
     assert preview["text"] == "事件名称为 API_EVENT。数据点数：30000。"
     assert any(item["name"] == "uploads/event.txt" for item in artifacts["artifacts"])
 
@@ -42,21 +56,25 @@ def test_api_service_binary_docx_upload(tmp_path: Path, artifact_dir: Path) -> N
     docx = Path("resources/input_doc/Kunming_building_metadata_test_case.docx")
 
     result = service.upload_file_bytes("binary-session", docx.name, docx.read_bytes())
+    assert result["status"] == "pending"
+    turn = service.turn("binary-session", "请根据附件整理当前项目的信息", [result["attachment_id"]])
     session = service.get_session("binary-session")
 
     write_json(
         artifact_dir / "api" / "service_binary_docx_upload.json",
         {
             "upload": result,
+            "turn": turn,
             "report": session["report"],
             "records": {k: v.get("value") for k, v in session["records"].items()},
         },
     )
 
-    assert result["uploaded"]["file_name"] == docx.name
-    assert result["uploaded"]["size"] == docx.stat().st_size
+    assert result["name"] == docx.name
+    assert result["size"] == docx.stat().st_size
     assert session["records"]["DataInfo.DT"]["value"] == 0.02
     assert session["records"]["DataInfo.NPTS"]["value"] == 30000
+    assert session["attachments"][0]["status"] == "used"
 
 
 def test_api_service_runs_qrest_tool(tmp_path: Path, artifact_dir: Path) -> None:
