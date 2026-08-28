@@ -6,6 +6,7 @@ This checklist tracks the current development plan. The priority is to make Stag
 
 Build an AI-assisted qREST configuration agent that can:
 
+- route natural-language qREST tasks through repo-native skills and skill handlers;
 - collect qREST metadata from conversation and uploaded files;
 - extract only supported fields as candidate values with evidence;
 - merge candidates into audited project state;
@@ -24,6 +25,8 @@ Build an AI-assisted qREST configuration agent that can:
 - [x] Ollama, Ollama CLI, and OpenAI-compatible client interfaces.
 - [x] Bundled qREST docs, examples, and Linux data tools under `resources/qrest_data`.
 - [x] `data_generator` and `data_loader` wrapped as deterministic agent tools.
+- [x] Repo-native skills under `resources/skills`.
+- [x] TaskCoordinator and skill handler registry for natural-language qREST data loading/generation.
 - [x] CLI smoke commands and unit tests.
 
 ## Phase 1: Metadata Core Hardening
@@ -99,6 +102,9 @@ Acceptance:
 - [x] Add a readable summary for `load_qrest` results.
 - [x] Add optional comparison between generated and source metadata.
 - [x] Add a tool-dispatch path from dialogue intent to `ToolRegistry.execute`.
+- [x] Add `qrest_data_generation` skill and handler.
+- [x] Add `qrest_data_loading` skill and handler.
+- [x] Update `/tools` and `/help` to present skills before low-level commands.
 
 Acceptance:
 
@@ -135,8 +141,8 @@ Acceptance:
 
 ## Immediate Next Tasks
 
-1. Start Phase 7 by formalizing the `analysis` schema.
-2. Add method-configuration placeholder tool specs.
-3. Decide whether Phase 7 should stay CLI/API-only or include a small web UI.
-4. Add persistent session reload if multi-day dialogue sessions become necessary.
-5. Exercise `/file`, `/load-qrest`, and `/generate-qrest` manually with `qwen3:4b-instruct`.
+1. Add a small web/UI affordance that shows available skills and recent task logs.
+2. Start Phase 7 by formalizing the `analysis` schema as a skill-handler target.
+3. Add method-configuration placeholder skill specs.
+4. Decide whether Phase 7 should stay CLI/API-only or include a small web UI.
+5. Exercise natural-language loading/generation tasks manually with `qwen3:4b-instruct`.

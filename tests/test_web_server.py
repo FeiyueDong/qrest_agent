@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from qrest_agent.api.service import ApiService
+from qrest_agent.resources import qrest_examples_root
 from qrest_agent.web.server import WebServerState, _make_handler
 from tests.conftest import write_json, write_text
 
@@ -34,6 +35,15 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
             "content_base64": base64.b64encode("事件名称为 WEB_EVENT。数据点数：30000。".encode("utf-8")).decode("ascii"),
         },
     )
+    task = _request_json(
+        handler,
+        "/api/chat",
+        method="POST",
+        payload={
+            "session_id": "web-session",
+            "message": f"解析 {qrest_examples_root() / 'kunming2' / 'kunming2.qrest'} 并导入当前项目",
+        },
+    )
     export = _request_json(
         handler,
         "/api/export-metadata",
@@ -50,6 +60,7 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
             "created": created,
             "chat": chat,
             "upload": upload,
+            "task": task,
             "export": export,
             "session": session,
             "artifacts": artifacts,
@@ -58,6 +69,10 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
 
     assert "qREST Agent" in index_html
     assert 'id="recordsTree"' in index_html
+    assert 'id="skillList"' in index_html
+    assert 'id="taskLogList"' in index_html
+    assert "自然语言任务会优先由 skill handler 处理" in index_html
+    assert "检查 metadata.json 和 data.txt 能不能生成 qREST" in index_html
     assert 'data-record-filter="known"' in index_html
     assert 'data-record-filter="missing"' in index_html
     assert 'data-record-filter="conflict"' in index_html
@@ -73,8 +88,15 @@ def test_web_server_smoke_flow(tmp_path: Path, artifact_dir: Path) -> None:
     assert "function renderArtifacts" not in index_html
     assert "function buildRecordTree" in index_html
     assert created["session_id"] == "web-session"
+    assert any(item["name"] == "qrest_data_generation" for item in created["skills"])
+    assert "qrest_data_loading" in created["skill_handlers"]
     assert "BuildingInfo.ProjectName" in session["records"]
+    assert "skills" in session
+    assert "skill_handlers" in session
+    assert "task_logs" in session
     assert upload["uploaded"]["file_name"] == "web_note.txt"
+    assert task["command"] == "qrest_data_loading"
+    assert any(item["name"] == "qrest_data_loading_task_log.json" for item in session["task_logs"])
     assert not export["ok"]
     assert any(item["name"] == "metadata_export_report.json" for item in artifacts["artifacts"])
     assert any(item["name"] == "uploads/web_note.txt" for item in artifacts["artifacts"])

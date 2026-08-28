@@ -27,6 +27,18 @@ class ToolRegistry:
         self._qrest_tools = QrestDataTools()
         self.artifacts = ArtifactManager(artifact_root)
         self._tools: dict[str, tuple[ToolSpec, Callable[..., Any]]] = {
+            "preflight_generate_qrest": (
+                ToolSpec(
+                    name="preflight_generate_qrest",
+                    description="Check whether qREST metadata JSON and time-series TXT data are ready for .qrest generation.",
+                    parameters={
+                        "metadata_json": "Path to qREST metadata JSON.",
+                        "data_txt": "Path to time-major text data.",
+                        "session_id": "Optional session id for managed preflight report output.",
+                    },
+                ),
+                self._qrest_tools.preflight_generate_qrest,
+            ),
             "generate_qrest": (
                 ToolSpec(
                     name="generate_qrest",
@@ -64,8 +76,12 @@ class ToolRegistry:
         if name not in self._tools:
             raise KeyError(f"unknown tool: {name}")
         _, function = self._tools[name]
+        session_id = arguments.get("session_id")
         prepared = self._prepare_arguments(name, dict(arguments))
-        return function(**prepared)
+        result = function(**prepared)
+        if session_id is not None:
+            self._write_tool_artifacts(str(session_id), name, result)
+        return result
 
     def _prepare_arguments(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = arguments.pop("session_id", None)
@@ -78,3 +94,17 @@ class ToolRegistry:
             arguments.setdefault("output_metadata_json", self.artifacts.path(str(session_id), "loaded_metadata.json"))
             arguments.setdefault("output_data_txt", self.artifacts.path(str(session_id), "loaded_data.txt"))
         return arguments
+
+    def _write_tool_artifacts(self, session_id: str, name: str, result: Any) -> None:
+        if name == "preflight_generate_qrest":
+            preflight = result.summary.get("preflight", {}) if hasattr(result, "summary") else {}
+            self.artifacts.write_json(session_id, "generate_qrest_preflight_report.json", preflight)
+        elif name == "generate_qrest":
+            payload = result.to_dict() if hasattr(result, "to_dict") else {"result": result}
+            self.artifacts.write_json(session_id, "generate_qrest_result.json", payload)
+            preflight = result.summary.get("preflight", {}) if hasattr(result, "summary") else {}
+            if preflight:
+                self.artifacts.write_json(session_id, "generate_qrest_preflight_report.json", preflight)
+        elif name == "load_qrest":
+            payload = result.to_dict() if hasattr(result, "to_dict") else {"result": result}
+            self.artifacts.write_json(session_id, "load_qrest_result.json", payload)

@@ -49,7 +49,27 @@ The current client layer supports:
 
 Provider-specific SDKs can be added behind the same `complete_json()` boundary.
 
-## Bundled qREST Tool Skills
+## Agentic Task And Skill Layer
+
+Natural-language qREST tasks are routed before ordinary metadata extraction.
+
+Current flow:
+
+1. `ChatSession` receives a user turn.
+2. `TaskCoordinator` detects task-level intent.
+3. `TaskHandlerRegistry` selects a registered skill handler.
+4. The skill handler loads the repo-native skill definition from `resources/skills/`.
+5. The handler calls deterministic tools through `ToolRegistry`.
+6. Tool outputs, state updates, artifacts, and task logs are returned to the dialogue.
+
+Current repo-native skills:
+
+- `qrest_data_loading`: parse `.qrest`, write `loaded_metadata.json` and `loaded_data.txt`, import metadata into session state, and write `qrest_data_loading_task_log.json`.
+- `qrest_data_generation`: preflight or generate `.qrest`, export current session metadata when requested, write generation artifacts, and write `qrest_data_generation_task_log.json`.
+
+Low-level commands such as `/load-qrest` and `/generate-qrest` remain available for debugging and scripted smoke runs, but the user-facing direction is natural-language task routing through skills.
+
+## Bundled qREST Deterministic Tools
 
 `resources/qrest_data/` contains the local qREST reference bundle used by this project:
 
@@ -57,12 +77,13 @@ Provider-specific SDKs can be added behind the same `complete_json()` boundary.
 - complete sample datasets;
 - Linux `data_generator` and `data_loader` binaries.
 
-`qrest_agent.tools.QrestDataTools` exposes these as deterministic agent skills:
+`qrest_agent.tools.QrestDataTools` exposes these deterministic tools:
 
+- `preflight_generate_qrest(metadata_json, data_txt)`;
 - `generate_qrest(metadata_json, data_txt, output_qrest)`;
 - `load_qrest(input_qrest, output_metadata_json, output_data_txt)`.
 
-These tools are intentionally kept separate from LLM extraction. The model may request a conversion, but the conversion itself is performed by the bundled command-line tools and returns a structured `ToolResult`.
+These tools are intentionally kept separate from LLM extraction. A skill handler may request a conversion, but the conversion itself is performed by bundled command-line tools and returns a structured `ToolResult`.
 
 `generate_qrest` performs deterministic preflight checks before running the binary:
 
@@ -98,11 +119,16 @@ It supports two modes:
 
 The shell keeps one in-memory `ChatSession` per process. Each turn can extract candidates, update metadata state, print missing/conflict prompts, and accept explicit user confirmation through `/confirm Field.Path value`.
 
-The shell also exposes deterministic tool commands:
+The shell is skill-first:
+
+- natural-language loading requests route to `qrest_data_loading`;
+- natural-language preflight/generation requests route to `qrest_data_generation`;
+- `/tools` lists repo-native skills, registered skill handlers, deterministic tools, and low-level shortcut commands.
+
+The shell still exposes low-level commands:
 
 - `/provider` and `/debug` show the active provider, model, and extractor;
 - `/file path` ingests a local file into the metadata workflow;
-- `/tools` lists available deterministic tools;
 - `/load-qrest input.qrest [source_metadata.json]` parses a binary qREST file into session artifacts;
 - `/generate-qrest metadata.json data.txt [output.qrest]` generates a qREST file and surfaces preflight warnings.
 

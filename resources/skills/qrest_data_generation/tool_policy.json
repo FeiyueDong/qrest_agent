@@ -1,0 +1,23 @@
+{
+  "name": "qrest_data_generation",
+  "version": "0.1.0",
+  "required_inputs": [
+    "metadata_json_or_exported_session_metadata",
+    "data_txt",
+    "output_qrest_when_generating"
+  ],
+  "tools": {
+    "preflight": "preflight_generate_qrest",
+    "generate": "generate_qrest",
+    "load": "load_qrest"
+  },
+  "default_strict": false,
+  "forbidden": [
+    "invent_missing_engineering_metadata",
+    "guess_file_paths",
+    "generate_with_mandatory_metadata_errors",
+    "hide_preflight_warnings",
+    "claim_full_consistency_when_warnings_exist"
+  ]
+}
+

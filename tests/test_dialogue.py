@@ -180,13 +180,120 @@ def test_chat_session_tool_commands_use_registry(tmp_path: Path, artifact_dir: P
 
     write_json(artifact_dir / "dialogue" / "tool_command_transcript.json", session.to_dict())
 
+    assert "可用 skills" in tools_result.response
+    assert "qrest_data_generation" in tools_result.response
+    assert "qrest_data_loading" in tools_result.response
+    assert "Deterministic tools" in tools_result.response
     assert "generate_qrest" in tools_result.response
+    assert "低层快捷命令" in tools_result.response
     assert load_result.tool_result is not None
     assert load_result.tool_result["ok"]
     assert load_result.report.ready
     assert generate_result.tool_result is not None
     assert generate_result.tool_result["ok"]
     assert "警告" in generate_result.response
+
+
+def test_chat_session_help_is_skill_first(artifact_dir: Path) -> None:
+    session = ChatSession()
+
+    result = session.handle("/help")
+
+    write_json(artifact_dir / "dialogue" / "skill_first_help.json", result.to_dict())
+
+    assert "自然语言任务示例" in result.response
+    assert "skill handler" in result.response
+    assert "检查 metadata.json 和 data.txt 能不能生成 qREST" in result.response
+    assert "/tools 查看可用 skills、skill handlers 和 deterministic tools" in result.response
+    assert "低层快捷命令" in result.response
+
+
+def test_chat_session_natural_language_preflights_qrest_generation(tmp_path: Path, artifact_dir: Path) -> None:
+    agent = MetadataAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
+    session = ChatSession(agent, session_id="dialogue-preflight")
+    example_dir = qrest_examples_root() / "kunming2"
+
+    result = session.handle(f"检查 {example_dir / 'metadata.json'} 和 {example_dir / 'data.txt'} 能不能生成 qREST")
+    artifacts = session.to_dict()["artifacts"]
+
+    write_json(
+        artifact_dir / "dialogue" / "natural_language_preflight.json",
+        {"result": result.to_dict(), "artifacts": artifacts},
+    )
+
+    assert result.command == "qrest_data_generation"
+    assert result.tool_result is not None
+    assert result.tool_result["mode"] == "preflight"
+    assert result.tool_result["preflight"]["ok"]
+    assert "可以生成，但输入并非完全一致" in result.response
+    assert any(item["name"] == "generate_qrest_preflight_report.json" for item in artifacts)
+
+
+def test_chat_session_natural_language_generates_from_current_metadata(tmp_path: Path, artifact_dir: Path) -> None:
+    agent = MetadataAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
+    session = ChatSession(agent, session_id="dialogue-generate-current")
+    example_dir = qrest_examples_root() / "kunming2"
+    session.handle(f"/file {example_dir / 'metadata.json'}")
+
+    result = session.handle(f"用当前项目状态和 {example_dir / 'data.txt'} 直接生成 qREST")
+    artifacts = session.to_dict()["artifacts"]
+
+    write_json(
+        artifact_dir / "dialogue" / "natural_language_generate_current_metadata.json",
+        {"result": result.to_dict(), "artifacts": artifacts},
+    )
+
+    assert result.command == "qrest_data_generation"
+    assert result.tool_result is not None
+    assert result.tool_result["mode"] == "generate"
+    assert result.tool_result["generation"]["ok"]
+    assert result.tool_result["metadata_json"].endswith("metadata.json")
+    assert "qREST 数据生成已完成" in result.response
+    assert any(item["name"] == "metadata.json" for item in artifacts)
+    assert any(item["name"] == "generated.qrest" for item in artifacts)
+    assert any(item["name"] == "qrest_data_generation_task_log.json" for item in artifacts)
+
+
+def test_chat_session_natural_language_generation_missing_data_path_blocks(tmp_path: Path, artifact_dir: Path) -> None:
+    agent = MetadataAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
+    session = ChatSession(agent, session_id="dialogue-missing-data")
+
+    result = session.handle("用当前项目状态生成 qREST")
+    artifacts = session.to_dict()["artifacts"]
+
+    write_json(
+        artifact_dir / "dialogue" / "natural_language_generation_missing_data.json",
+        {"result": result.to_dict(), "artifacts": artifacts},
+    )
+
+    assert result.command == "qrest_data_generation"
+    assert result.tool_result is not None
+    assert "export" in result.tool_result
+    assert "BuildingInfo.Elevation" in result.tool_result["export"]["blocked_fields"]
+    assert "生成已停止" in result.response
+    assert any(item["name"] == "metadata_export_report.json" for item in artifacts)
+
+
+def test_chat_session_natural_language_loads_qrest(tmp_path: Path, artifact_dir: Path) -> None:
+    agent = MetadataAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
+    session = ChatSession(agent, session_id="dialogue-loading")
+    example_dir = qrest_examples_root() / "kunming2"
+
+    result = session.handle(f"解析 {example_dir / 'kunming2.qrest'} 并导入当前项目")
+    artifacts = session.to_dict()["artifacts"]
+
+    write_json(
+        artifact_dir / "dialogue" / "natural_language_loading.json",
+        {"result": result.to_dict(), "artifacts": artifacts},
+    )
+
+    assert result.command == "qrest_data_loading"
+    assert result.tool_result is not None
+    assert result.tool_result["load"]["ok"]
+    assert result.report.ready
+    assert "BuildingInfo.ProjectName" in session.agent.state.records
+    assert "已将解析出的 metadata 导入当前会话" in result.response
+    assert any(item["name"] == "qrest_data_loading_task_log.json" for item in artifacts)
 
 
 def test_cli_defaults_use_provider_config() -> None:

@@ -1,0 +1,18 @@
+{
+  "name": "qrest_data_loading",
+  "version": "0.1.0",
+  "required_inputs": [
+    "input_qrest"
+  ],
+  "optional_inputs": [
+    "compare_metadata_json"
+  ],
+  "tools": {
+    "load": "load_qrest"
+  },
+  "forbidden": [
+    "guess_input_qrest_path",
+    "hide_metadata_comparison_warnings",
+    "claim_ready_without_validation"
+  ]
+}

@@ -96,6 +96,10 @@ def main(argv: list[str] | None = None) -> int:
     generate_parser.add_argument("data_txt")
     generate_parser.add_argument("output_qrest")
 
+    preflight_parser = subparsers.add_parser("preflight-generate-qrest", help="check metadata JSON and data TXT before .qrest generation")
+    preflight_parser.add_argument("metadata_json")
+    preflight_parser.add_argument("data_txt")
+
     load_parser = subparsers.add_parser("load-qrest", help="extract metadata JSON and data TXT from a .qrest file")
     load_parser.add_argument("--compare-metadata-json", help="optional metadata JSON to compare with loaded metadata")
     load_parser.add_argument("input_qrest")
@@ -123,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
         return _resources(args.json)
     if args.command == "generate-qrest":
         return _generate_qrest(args.metadata_json, args.data_txt, args.output_qrest, args.strict)
+    if args.command == "preflight-generate-qrest":
+        return _preflight_generate_qrest(args.metadata_json, args.data_txt)
     if args.command == "load-qrest":
         return _load_qrest(args.input_qrest, args.output_metadata_json, args.output_data_txt, args.compare_metadata_json)
     return 2
@@ -247,6 +253,12 @@ def _resources(as_json: bool) -> int:
 
 def _generate_qrest(metadata_json: str, data_txt: str, output_qrest: str, strict: bool = False) -> int:
     result = QrestDataTools().generate_qrest(metadata_json, data_txt, output_qrest, strict=strict)
+    print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    return 0 if result.ok else 1
+
+
+def _preflight_generate_qrest(metadata_json: str, data_txt: str) -> int:
+    result = QrestDataTools().preflight_generate_qrest(metadata_json, data_txt)
     print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     return 0 if result.ok else 1
 

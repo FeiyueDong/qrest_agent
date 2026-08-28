@@ -40,6 +40,10 @@ def llm_resource_root() -> Path:
     return resource_root() / "llm"
 
 
+def skills_root() -> Path:
+    return resource_root() / "skills"
+
+
 def llm_benchmark_cases_path() -> Path:
     return llm_resource_root() / "benchmark_cases.json"
 

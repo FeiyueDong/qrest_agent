@@ -1,14 +1,16 @@
 # qREST Agent
 
-qREST Agent is a first-pass framework for building an AI-assisted metadata acquisition tool for qREST projects.
+qREST Agent is a first-pass framework for building a skill-first AI assistant for qREST projects.
 
-The current focus is the first stage:
+The current focus is an agentic first stage:
 
+- route natural-language qREST tasks through repo-native skills and skill handlers;
 - collect building, instrumentation, and data metadata from user messages and uploaded materials;
 - store extracted values as candidates with evidence;
 - merge candidates into a project state without letting the model directly overwrite final metadata;
 - validate required qREST fields deterministically;
 - export standard qREST `metadata.json`;
+- load and generate `.qrest` artifacts through deterministic qREST tools;
 - keep an `analysis` extension point for later algorithm-parameter configuration.
 
 The core package intentionally has no third-party runtime dependency yet, so it can run in the current `.venv` before local and online model providers are finalized.
@@ -64,7 +66,13 @@ env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli chat \
   --transcript test_outputs/dialogue/manual_chat_transcript.json
 ```
 
-Useful commands inside the chat:
+Prefer natural-language tasks inside the chat:
+
+- `解析 resources/qrest_data/examples/kunming2/kunming2.qrest 并导入当前项目`
+- `检查 metadata.json 和 data.txt 能不能生成 qREST`
+- `用当前项目状态和 data.txt 直接生成 qREST`
+
+Useful inspection and low-level commands:
 
 - `/state`
 - `/provider`
@@ -77,6 +85,8 @@ Useful commands inside the chat:
 - `/generate-qrest metadata.json data.txt [output.qrest]`
 - `/confirm Field.Path value`
 - `/quit`
+
+`/tools` lists repo-native skills, registered skill handlers, deterministic tools, and low-level shortcut commands.
 
 For user instructions that should modify state, the dialogue layer asks the configured model to parse a structured action, then Python validates and executes it. Examples:
 
@@ -130,9 +140,14 @@ This keeps tests and agent workflows independent from `/home/yue/CodeFiles/qrest
 
 Input documents for ingestion tests live under `resources/input_doc/`. PDF parsing currently uses the system `pdftotext` command; DOCX/XLSX/CSV parsing uses the Python standard library.
 
-## qREST Data Tools
+## qREST Skills And Tools
 
-The command-line tools are exposed as agent-callable wrappers and CLI commands:
+The preferred dialogue path is skill-first. Natural-language requests are routed by `TaskCoordinator` to registered skill handlers:
+
+- `qrest_data_loading`: parse an existing `.qrest` file, write readable artifacts, and import loaded metadata into the session.
+- `qrest_data_generation`: preflight or generate a `.qrest` file from metadata and time-series data.
+
+The skill handlers call deterministic tools through `ToolRegistry`. The command-line tools remain available as low-level shortcuts:
 
 ```bash
 env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli generate-qrest \
@@ -150,12 +165,14 @@ Inside Python, use `QrestDataTools.generate_qrest()` and `QrestDataTools.load_qr
 
 `generate-qrest` runs a deterministic preflight before calling the bundled binary. It validates metadata and reports data mismatches such as `DataInfo.NPTS` not matching the number of rows in `data.txt`. Warnings are shown in the `ToolResult`; use `--strict` to make warnings block generation.
 
-The dialogue shell can also call these tools:
+The dialogue shell still accepts low-level commands:
 
 ```bash
 /load-qrest resources/qrest_data/examples/kunming2/kunming2.qrest
 /generate-qrest resources/qrest_data/examples/kunming2/metadata.json resources/qrest_data/examples/kunming2/data.txt
 ```
+
+These commands are kept for precise debugging and scripted smoke runs. User-facing workflows should prefer natural-language tasks handled by skills.
 
 When a dialogue session supplies a `session_id`, tool outputs are managed under that session's artifact directory.
 
@@ -166,7 +183,7 @@ The first API layer is service-first and dependency-light:
 - `qrest_agent.api.ApiService` manages sessions, chat turns, text uploads, tool calls, and artifacts.
 - `qrest_agent.api.app.create_app()` provides an optional FastAPI wrapper. Install `qrest-agent[api]` before serving it.
 
-The API service and CLI both call the same deterministic validator, state merger, and `ToolRegistry`.
+The API service and CLI both call the same deterministic validator, state merger, skill handlers, and `ToolRegistry`.
 
 ## Design Boundary
 

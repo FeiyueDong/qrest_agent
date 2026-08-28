@@ -83,6 +83,32 @@ def test_api_service_runs_qrest_tool(tmp_path: Path, artifact_dir: Path) -> None
     assert any(item["name"] == "loaded_data.txt" for item in artifacts["artifacts"])
 
 
+def test_api_service_runs_preflight_tool(tmp_path: Path, artifact_dir: Path) -> None:
+    service = ApiService(artifact_root=tmp_path / "api_artifacts")
+    service.create_session("preflight-session")
+    example_dir = qrest_examples_root() / "kunming2"
+
+    result = service.run_tool(
+        "preflight-session",
+        "preflight_generate_qrest",
+        {
+            "metadata_json": example_dir / "metadata.json",
+            "data_txt": example_dir / "data.txt",
+        },
+    )
+    artifacts = service.list_artifacts("preflight-session")
+
+    write_json(
+        artifact_dir / "api" / "service_preflight_tool_result.json",
+        {"result": result, "artifacts": artifacts},
+    )
+
+    assert result["ok"]
+    assert "state_update" not in result
+    assert any("DataInfo.NPTS=30000" in warning for warning in result["warnings"])
+    assert any(item["name"] == "generate_qrest_preflight_report.json" for item in artifacts["artifacts"])
+
+
 def test_api_service_exports_weighted_metadata(tmp_path: Path, artifact_dir: Path) -> None:
     service = ApiService(artifact_root=tmp_path / "api_artifacts")
     service.create_session("export-session")

@@ -73,6 +73,19 @@ class PreflightReport:
 class QrestDataTools:
     """Agent-callable wrappers around qREST data command-line tools."""
 
+    def preflight_generate_qrest(self, metadata_json: str | Path, data_txt: str | Path) -> ToolResult:
+        report = preflight_generate_qrest(metadata_json, data_txt)
+        return ToolResult(
+            ok=report.ready,
+            command=[],
+            stdout="",
+            stderr="" if report.ready else "preflight failed",
+            outputs={},
+            warnings=report.warnings,
+            errors=report.errors,
+            summary={"preflight": report.to_dict()},
+        )
+
     def generate_qrest(
         self,
         metadata_json: str | Path,

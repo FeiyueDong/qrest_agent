@@ -443,6 +443,31 @@ INDEX_HTML = r"""<!doctype html>
       display: flex;
       flex-direction: column;
     }
+    .skill-list, .task-log-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .task-log-list {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+    .skill-item, .task-log-item {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 8px;
+      color: var(--accent-strong);
+      background: var(--soft);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .task-log-item {
+      border-radius: 7px;
+      color: var(--muted);
+      background: #fbfcfb;
+    }
     .tree-node, .tree-leaf {
       border-bottom: 1px solid var(--line);
     }
@@ -605,7 +630,7 @@ INDEX_HTML = r"""<!doctype html>
       <section class="messages" id="messages" aria-live="polite"></section>
 
       <form class="composer" id="chatForm">
-        <textarea id="messageInput" placeholder="输入工程描述或命令，例如 /state"></textarea>
+        <textarea id="messageInput" placeholder="输入 qREST 任务，例如：解析 demo.qrest 并导入当前项目；检查 metadata.json 和 data.txt 能不能生成 qREST"></textarea>
         <button class="primary" id="sendButton" type="submit">发送</button>
         <div class="composer-tools">
           <div class="file-actions">
@@ -639,6 +664,17 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <div class="records-tree" id="recordsTree"></div>
       </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Skills</h2>
+          <span class="muted" id="skillCount"></span>
+        </div>
+        <div class="muted">自然语言任务会优先由 skill handler 处理。</div>
+        <div class="skill-list" id="skillList"></div>
+        <div class="muted" style="margin-top: 10px;">Task logs</div>
+        <div class="task-log-list" id="taskLogList"></div>
+      </section>
     </aside>
   </main>
 
@@ -659,6 +695,8 @@ INDEX_HTML = r"""<!doctype html>
     const exportButton = document.querySelector("#exportButton");
     const refreshButton = document.querySelector("#refreshButton");
     const recordFilterButtons = Array.from(document.querySelectorAll("[data-record-filter]"));
+    const skillList = document.querySelector("#skillList");
+    const taskLogList = document.querySelector("#taskLogList");
 
     async function api(path, options = {}) {
       const headers = Object.assign({"Content-Type": "application/json"}, options.headers || {});
@@ -808,7 +846,45 @@ INDEX_HTML = r"""<!doctype html>
       document.querySelector("#missingCount").textContent = String(recordSets.missing.length);
       document.querySelector("#conflictCount").textContent = String(recordSets.conflict.length);
       renderFilterButtons();
+      renderSkills(session);
       renderRecords(recordSets[state.recordFilter] || recordSets.known, state.recordFilter);
+    }
+
+    function renderSkills(session) {
+      const skills = session.skills || [];
+      const handlers = session.skill_handlers || [];
+      const taskLogs = session.task_logs || [];
+      document.querySelector("#skillCount").textContent = skills.length + " skills / " + handlers.length + " handlers";
+      skillList.replaceChildren();
+      const entries = skills.length ? skills : handlers.map((name) => ({name, policy_name: name}));
+      if (!entries.length) {
+        const empty = document.createElement("span");
+        empty.className = "skill-item";
+        empty.textContent = "暂无 skill";
+        skillList.append(empty);
+      } else {
+        for (const skill of entries) {
+          const item = document.createElement("span");
+          item.className = "skill-item";
+          const name = skill.policy_name || skill.name;
+          item.textContent = skill.version ? name + " v" + skill.version : name;
+          skillList.append(item);
+        }
+      }
+      taskLogList.replaceChildren();
+      if (!taskLogs.length) {
+        const empty = document.createElement("div");
+        empty.className = "task-log-item";
+        empty.textContent = "暂无 task log";
+        taskLogList.append(empty);
+      } else {
+        for (const log of taskLogs.slice(-4).reverse()) {
+          const item = document.createElement("div");
+          item.className = "task-log-item";
+          item.textContent = log.name;
+          taskLogList.append(item);
+        }
+      }
     }
 
     function collectRecordSets(records, report) {

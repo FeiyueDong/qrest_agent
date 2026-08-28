@@ -15,6 +15,28 @@ def test_lists_qrest_data_tool_specs(artifact_dir: Path) -> None:
 
     assert "generate_qrest" in names
     assert "load_qrest" in names
+    assert "preflight_generate_qrest" in names
+
+
+def test_executes_preflight_with_session_artifact(tmp_path: Path, artifact_dir: Path) -> None:
+    registry = ToolRegistry(artifact_root=tmp_path / "artifacts")
+    example_dir = qrest_examples_root() / "kunming2"
+
+    result = registry.execute(
+        "preflight_generate_qrest",
+        {
+            "session_id": "session-preflight",
+            "metadata_json": example_dir / "metadata.json",
+            "data_txt": example_dir / "data.txt",
+        },
+    )
+    payload = result.to_dict()
+    payload["managed_artifacts"] = registry.artifacts.list("session-preflight")
+    write_json(artifact_dir / "tools" / "registry_preflight_result.json", payload)
+
+    assert result.ok
+    assert any("DataInfo.NPTS=30000" in warning for warning in result.warnings)
+    assert (tmp_path / "artifacts" / "session-preflight" / "generate_qrest_preflight_report.json").exists()
 
 
 def test_executes_load_qrest(tmp_path: Path, artifact_dir: Path) -> None:

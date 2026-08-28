@@ -7,9 +7,11 @@ from typing import Any
 
 from qrest_agent.agent.actions import ActionIntent, ActionInterpreter, FieldUpdate, should_interpret_action
 from qrest_agent.agent.metadata_agent import MetadataAgent, TurnResult
+from qrest_agent.agent.tasks import TaskCoordinator
 from qrest_agent.core.models import Candidate, Evidence, ValidationReport
 from qrest_agent.core.schema import QREST_FIELD_SPECS_BY_PATH
 from qrest_agent.core.validator import validate_state
+from qrest_agent.skills import SkillRegistry
 from qrest_agent.tools.qrest_data_tools import ToolResult
 
 
@@ -52,6 +54,7 @@ class ChatSession:
         self.session_id = session_id
         self.runtime_info = runtime_info or {"provider": "rule", "model": None, "extractor": "rule"}
         self.action_interpreter = ActionInterpreter(getattr(self.agent, "llm_client", None))
+        self.task_coordinator = TaskCoordinator(self.agent, self.session_id)
         self.turns: list[DialogueTurn] = []
 
     def handle(self, message: str) -> DialogueResult:
@@ -62,7 +65,9 @@ class ChatSession:
         elif text.startswith("/"):
             result = self._handle_command(text)
         else:
-            result = self._handle_natural_language_action(text)
+            result = self._handle_task(text)
+            if result is None:
+                result = self._handle_natural_language_action(text)
             if result is None:
                 turn_result = self.agent.run_turn(text=text)
                 result = _dialogue_from_agent_turn(turn_result, self.agent)
@@ -79,12 +84,24 @@ class ChatSession:
 
     def to_dict(self) -> dict[str, Any]:
         report = validate_state(self.agent.state)
+        artifacts = self.agent.tools.artifacts.list(self.session_id)
+        skills = SkillRegistry().list_skills()
         return {
             "session_id": self.session_id,
             "runtime": self.runtime_info,
             "report": report.to_dict(),
             "records": self.agent.state.to_audit_dict(),
-            "artifacts": self.agent.tools.artifacts.list(self.session_id),
+            "artifacts": artifacts,
+            "skills": [
+                {
+                    "name": skill.name,
+                    "policy_name": skill.policy.get("name", skill.name),
+                    "version": skill.policy.get("version"),
+                }
+                for skill in skills
+            ],
+            "skill_handlers": self.task_coordinator.handlers.list_names(),
+            "task_logs": [item for item in artifacts if item["name"].endswith("_task_log.json")],
             "turns": [turn.to_dict() for turn in self.turns],
         }
 
@@ -154,6 +171,17 @@ class ChatSession:
         if intent.action == "confirm_field":
             return self._confirm_fields_from_intent(text, intent)
         return None
+
+    def _handle_task(self, text: str) -> DialogueResult | None:
+        result = self.task_coordinator.handle(text)
+        if result is None:
+            return None
+        return DialogueResult(
+            response=result.response,
+            report=result.report,
+            command=result.command,
+            tool_result=result.tool_result,
+        )
 
     def _resolve_conflicts_from_intent(self, text: str, intent: ActionIntent) -> DialogueResult:
         report = validate_state(self.agent.state)
@@ -238,12 +266,25 @@ class ChatSession:
         return result
 
     def _tools(self, command: str) -> DialogueResult:
-        lines = ["可用工具："]
+        skills = SkillRegistry().list_skills()
+        lines = ["可用 skills："]
+        if skills:
+            for skill in skills:
+                policy_name = skill.policy.get("name", skill.name)
+                version = skill.policy.get("version")
+                suffix = f" (v{version})" if version else ""
+                lines.append(f"- {policy_name}{suffix}: {skill.root}")
+        else:
+            lines.append("- 当前未注册 repo-native skill。")
+        lines.append("已注册 skill handlers：")
+        for name in self.task_coordinator.handlers.list_names():
+            lines.append(f"- {name}")
+        lines.append("Deterministic tools：")
         for spec in self.agent.tools.list_specs():
             lines.append(f"- {spec.name}: {spec.description}")
         lines.extend(
             [
-                "对话命令：",
+                "低层快捷命令：",
                 "/load-qrest input.qrest [source_metadata.json]",
                 "/generate-qrest metadata.json data.txt [output.qrest]",
             ]
@@ -291,8 +332,12 @@ class ChatSession:
         return self._command_result(
             "\n".join(
                 [
-                    "可直接输入工程描述，我会提取 qREST 元信息候选值。",
+                    "可直接输入 qREST 任务或工程描述；自然语言任务会优先由 skill handler 处理。",
                     _build_runtime_summary(self.runtime_info),
+                    "自然语言任务示例：",
+                    "解析 resources/qrest_data/examples/kunming2/kunming2.qrest 并导入当前项目",
+                    "检查 metadata.json 和 data.txt 能不能生成 qREST",
+                    "用当前项目状态和 data.txt 直接生成 qREST",
                     "可用命令：",
                     "/provider 查看当前模型/provider",
                     "/debug 查看当前模型/provider",
@@ -300,10 +345,11 @@ class ChatSession:
                     "/missing 查看仍缺少的必要字段",
                     "/conflicts 查看冲突字段",
                     "/file path 解析上传资料",
-                    "/tools 查看可用 qREST 工具",
+                    "/tools 查看可用 skills、skill handlers 和 deterministic tools",
+                    "/confirm Field.Path value 确认或修正字段值",
+                    "低层快捷命令：",
                     "/load-qrest input.qrest [source_metadata.json] 解析 qREST 文件",
                     "/generate-qrest metadata.json data.txt [output.qrest] 生成 qREST 文件",
-                    "/confirm Field.Path value 确认或修正字段值",
                     "/quit 结束命令行对话",
                 ]
             ),
