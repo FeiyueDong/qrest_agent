@@ -196,3 +196,14 @@ The LLM layer only produces `Candidate` records. The deterministic core owns:
 - qREST metadata export.
 
 This is deliberate: when key information is missing, the agent should report the missing fields and ask the user for more evidence instead of inventing engineering values.
+
+## Architecture Refactor Status (Phase 1-2)
+
+Per [docs/qrest-agent 架构重构方案.md](docs/qrest-agent%20架构重构方案.md), the project is migrating from a fixed-pipeline design to an agent-led architecture:
+
+- `qrest_agent.state.WorkingState` (new): canonical working state. Every fact is stored as `value + status + evidence (+ derived_from)` with statuses `missing / extracted / uncertain / derived / inferred / confirmed / conflict`. `inferred` and `uncertain` never enter final metadata by default, and export requires evidence.
+- `qrest_agent.agent.agent.QrestAgent` (new): the Phase 1 main agent. It owns the Working State, decides the next action (`ask_missing / resolve_conflicts / review_warnings / ready`), and runs the "understand → extract → update state → validate → decide" loop. Its system prompt (`AGENT_SYSTEM_PROMPT`) defines the agent's decision authority and anti-hallucination rules.
+- `MetadataAgent` / `MetadataState` are now transitional facades over `QrestAgent` / `WorkingState`; they keep the old API working while Phase 3 splits the remaining modules.
+- Evidence requirement: `WorkingState.to_metadata()` (and the facade) only export values whose status is exportable AND that carry evidence.
+
+Phase tracking lives in [docs/refactor_status.md](docs/refactor_status.md).

@@ -4,7 +4,7 @@ import json
 from copy import deepcopy
 from pathlib import Path
 
-from qrest_agent.core.models import Candidate
+from qrest_agent.core.models import Candidate, Evidence
 from qrest_agent.core.state import MetadataState
 from qrest_agent.core.validator import validate_state
 from qrest_agent.resources import qrest_examples_root
@@ -58,7 +58,14 @@ def test_candidate_update_preserves_unrelated_extensions(artifact_dir: Path) -> 
     metadata["CustomRoot"] = {"note": "preserve me"}
     state = MetadataState.from_metadata(metadata)
 
-    state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="UpdatedName", status="confirmed"))
+    state.submit(
+        Candidate(
+            field_path="BuildingInfo.ProjectName",
+            value="UpdatedName",
+            status="confirmed",
+            evidence=[Evidence(source_id="test", text="user update")],
+        )
+    )
     exported = state.to_metadata()
     write_json(artifact_dir / "state" / "updated_with_extension_metadata.json", exported)
 

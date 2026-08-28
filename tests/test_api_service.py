@@ -4,7 +4,7 @@ from pathlib import Path
 
 from qrest_agent.api.app import create_app
 from qrest_agent.api.service import ApiService
-from qrest_agent.core.models import Candidate
+from qrest_agent.core.models import Candidate, Evidence
 from qrest_agent.resources import qrest_examples_root
 from tests.conftest import write_json
 
@@ -113,17 +113,19 @@ def test_api_service_exports_weighted_metadata(tmp_path: Path, artifact_dir: Pat
     service = ApiService(artifact_root=tmp_path / "api_artifacts")
     service.create_session("export-session")
     session = service._session("export-session")
+    evidence = [Evidence(source_id="test", text="manual candidate")]
     for candidate in [
-        Candidate(field_path="BuildingInfo.ElevationNum", value=1, status="confirmed"),
-        Candidate(field_path="BuildingInfo.Elevation", value=[0.0], status="confirmed"),
-        Candidate(field_path="InstrumentInfo.ChannelNum", value=1, status="confirmed"),
+        Candidate(field_path="BuildingInfo.ElevationNum", value=1, status="confirmed", evidence=evidence),
+        Candidate(field_path="BuildingInfo.Elevation", value=[0.0], status="confirmed", evidence=evidence),
+        Candidate(field_path="InstrumentInfo.ChannelNum", value=1, status="confirmed", evidence=evidence),
         Candidate(
             field_path="InstrumentInfo.Channels",
             value=[{"ChannelNo": 1, "Azimuth": 90.0, "LocationXYZ": [0.0, 0.0, 0.0]}],
             status="confirmed",
+            evidence=evidence,
         ),
-        Candidate(field_path="DataInfo.NPTS", value=30000, status="confirmed"),
-        Candidate(field_path="DataInfo.DT", value=0.02, status="confirmed"),
+        Candidate(field_path="DataInfo.NPTS", value=30000, status="confirmed", evidence=evidence),
+        Candidate(field_path="DataInfo.DT", value=0.02, status="confirmed", evidence=evidence),
     ]:
         session.agent.state.submit(candidate)
 

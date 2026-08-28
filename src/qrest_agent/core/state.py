@@ -3,113 +3,72 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from qrest_agent.core.models import Alternative, Candidate, Evidence, FieldRecord
-from qrest_agent.core.path import get_path, set_path
+from qrest_agent.core.models import Candidate, Evidence, FieldRecord
+from qrest_agent.core.path import get_path
 from qrest_agent.core.schema import DEFAULT_METADATA, QREST_REQUIRED_PATHS
+from qrest_agent.state.working_state import WorkingState
 
 
 class MetadataState:
-    def __init__(self, records: dict[str, FieldRecord] | None = None, base_metadata: dict[str, Any] | None = None) -> None:
-        self.records = records or {}
-        self.base_metadata = deepcopy(base_metadata) if base_metadata is not None else deepcopy(DEFAULT_METADATA)
+    """Phase 1-2 过渡门面：委托给新的 qrest_agent.state.WorkingState。
+
+    旧调用方（dialogue / validator / exporter / tests）继续通过本类工作；
+    Phase 3 拆分后本类将被删除，新主 Agent 直接使用 WorkingState。
+    """
+
+    def __init__(
+        self,
+        records: dict[str, FieldRecord] | None = None,
+        base_metadata: dict[str, Any] | None = None,
+        working: WorkingState | None = None,
+    ) -> None:
+        if working is not None:
+            self.working = working
+            return
+        self.working = WorkingState(
+            base_metadata=deepcopy(base_metadata) if base_metadata is not None else deepcopy(DEFAULT_METADATA)
+        )
+        for path, record in (records or {}).items():
+            status = record.status if record.status != "empty" else "missing"
+            self.working.set(
+                path,
+                record.value,
+                status=status,
+                confidence=record.confidence,
+                evidence=list(record.evidence),
+            )
+
+    @property
+    def records(self) -> dict[str, FieldRecord]:
+        return self.working.fields
 
     @classmethod
     def empty(cls) -> "MetadataState":
-        state = cls(base_metadata=DEFAULT_METADATA)
-        for path in ("Header", "Version", "Units"):
-            value = get_path(DEFAULT_METADATA, path)
-            state.records[path] = FieldRecord(
-                value=deepcopy(value),
-                status="confirmed",
-                confidence=1.0,
-                evidence=[Evidence(source_id="system_default", text="qREST metadata default")],
-            )
+        state = cls()
+        state.working.seed_defaults(
+            {path: get_path(DEFAULT_METADATA, path) for path in ("Header", "Version", "Units")}
+        )
         return state
 
     @classmethod
     def from_metadata(cls, metadata: dict[str, Any], source_id: str = "metadata") -> "MetadataState":
         state = cls(base_metadata=metadata)
-        for path in QREST_REQUIRED_PATHS:
-            value = get_path(metadata, path)
-            if value is not None:
-                state.records[path] = FieldRecord(
-                    value=deepcopy(value),
-                    status="confirmed",
-                    confidence=1.0,
-                    evidence=[Evidence(source_id=source_id, location=path)],
-                )
+        state.working.import_metadata(metadata, source_id=source_id, paths=QREST_REQUIRED_PATHS)
         return state
 
     def submit(self, candidate: Candidate) -> FieldRecord:
-        current = self.records.get(candidate.field_path)
-        if candidate.status == "missing" or candidate.value is None:
-            if current is None:
-                current = FieldRecord(value=None, status="missing", confidence=candidate.confidence)
-                self.records[candidate.field_path] = current
-            return current
-
-        if current is None or current.status in {"empty", "missing"}:
-            current = FieldRecord(
-                value=deepcopy(candidate.value),
-                status=candidate.status,
-                confidence=candidate.confidence,
-                evidence=list(candidate.evidence),
-            )
-            self.records[candidate.field_path] = current
-            return current
-
-        if current.status == "confirmed" and candidate.status != "confirmed":
-            return current
-
-        if current.value == candidate.value:
-            current.confidence = max(current.confidence, candidate.confidence)
-            current.evidence.extend(candidate.evidence)
-            if candidate.status == "confirmed":
-                current.status = "confirmed"
-            return current
-
-        if candidate.status == "confirmed":
-            current.alternatives.append(
-                Alternative(
-                    value=deepcopy(current.value),
-                    status=current.status if current.status != "empty" else "extracted",
-                    confidence=current.confidence,
-                    evidence=list(current.evidence),
-                )
-            )
-            current.value = deepcopy(candidate.value)
-            current.status = "confirmed"
-            current.confidence = candidate.confidence
-            current.evidence = list(candidate.evidence)
-            return current
-
-        current.status = "conflict"
-        current.alternatives.append(
-            Alternative(
-                value=deepcopy(candidate.value),
-                status=candidate.status,
-                confidence=candidate.confidence,
-                evidence=list(candidate.evidence),
-            )
-        )
-        return current
+        return self.working.submit(candidate)
 
     def submit_many(self, candidates: list[Candidate]) -> None:
-        for candidate in candidates:
-            self.submit(candidate)
+        self.working.submit_all(candidates)
 
-    def to_metadata(self, include_reserved_analysis: bool = True) -> dict[str, Any]:
-        metadata = deepcopy(self.base_metadata)
+    def to_metadata(self, include_reserved_analysis: bool = True, require_evidence: bool = True) -> dict[str, Any]:
+        metadata = self.working.to_metadata(require_evidence=require_evidence)
         if include_reserved_analysis and "analysis" not in metadata:
             metadata["analysis"] = deepcopy(DEFAULT_METADATA["analysis"])
         if not include_reserved_analysis:
             metadata.pop("analysis", None)
-
-        for path, record in self.records.items():
-            if record.status in {"empty", "missing", "conflict"}:
-                continue
-            set_path(metadata, path, deepcopy(record.value))
         return metadata
 
     def to_audit_dict(self) -> dict[str, Any]:
-        return {path: record.to_dict() for path, record in sorted(self.records.items())}
+        return self.working.to_audit_dict()

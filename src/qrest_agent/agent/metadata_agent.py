@@ -1,93 +1,44 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from qrest_agent.agent.extractor import LLMExtractor, RuleBasedExtractor
-from qrest_agent.agent.tool_registry import ToolRegistry
+from qrest_agent.agent.agent import QrestAgent, TurnResult
 from qrest_agent.core.exporter import MetadataExportResult, prepare_metadata_export
 from qrest_agent.core.models import Candidate, ValidationReport
 from qrest_agent.core.state import MetadataState
 from qrest_agent.core.validator import validate_state
-from qrest_agent.ingestion.sources import SourceChunk, SourceManager
+from qrest_agent.ingestion.sources import SourceChunk
 from qrest_agent.llm.clients import BaseLLMClient
 
 
-@dataclass(slots=True)
-class TurnResult:
-    candidates: list[Candidate]
-    report: ValidationReport
-    response: str
-    extractor: str = "unknown"
-    fallback_reason: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "candidates": [item.to_dict() for item in self.candidates],
-            "report": self.report.to_dict(),
-            "response": self.response,
-            "extractor": self.extractor,
-            "fallback_reason": self.fallback_reason,
-        }
-
-
 class MetadataAgent:
-    def __init__(self, llm_client: BaseLLMClient | None = None, tool_registry: ToolRegistry | None = None) -> None:
+    """旧管线的过渡门面（Phase 1-2）：委托给新的 QrestAgent。
+
+    新主 Agent 是决策主体；本类保留旧 API（state/tools/extractor）供
+    dialogue、API、Web 与既有测试使用，Phase 3 拆分后将被移除。
+    """
+
+    def __init__(
+        self,
+        llm_client: BaseLLMClient | None = None,
+        tool_registry: Any | None = None,
+    ) -> None:
+        self.core = QrestAgent(llm_client=llm_client, tool_registry=tool_registry)
+        self.state = MetadataState(working=self.core.working_state)
         self.llm_client = llm_client
-        self.state = MetadataState.empty()
-        self.sources = SourceManager()
-        self.extractor = LLMExtractor(llm_client) if llm_client is not None else RuleBasedExtractor()
-        self.tools = tool_registry or ToolRegistry()
+        self.sources = self.core.sources
+        self.extractor = self.core.extractor
+        self.tools = self.core.tools
 
     def ingest_text(self, text: str, source_id: str = "user_message") -> list[SourceChunk]:
-        return self.sources.add_text(text, source_id=source_id)
+        return self.core.ingest_text(text, source_id=source_id)
 
     def ingest_file(self, path: str | Path) -> list[SourceChunk]:
-        return self.sources.add_file(path)
+        return self.core.ingest_file(path)
 
     def run_turn(self, text: str | None = None, files: list[str | Path] | None = None) -> TurnResult:
-        chunks: list[SourceChunk] = []
-        if text:
-            chunks.extend(self.ingest_text(text))
-        for path in files or []:
-            chunks.extend(self.ingest_file(path))
-
-        using_llm = isinstance(self.extractor, LLMExtractor)
-        fallback_reason: str | None = None
-        rule_extractor = RuleBasedExtractor()
-        if using_llm:
-            try:
-                llm_candidates = self.extractor.extract(chunks)
-            except Exception as exc:
-                fallback_reason = f"LLM extraction failed: {exc}"
-                llm_candidates = []
-
-            rule_candidates = rule_extractor.extract(chunks)
-            if llm_candidates:
-                candidates = llm_candidates + rule_candidates
-                extractor_name = "llm+rule" if rule_candidates else "llm"
-            else:
-                fallback_reason = fallback_reason or "LLM extraction returned no candidates"
-                candidates = rule_candidates
-                extractor_name = "rule"
-        else:
-            try:
-                candidates = rule_extractor.extract(chunks)
-            except Exception as exc:
-                fallback_reason = f"rule extraction failed: {exc}"
-                candidates = []
-            extractor_name = "rule"
-
-        self.state.submit_many(candidates)
-        report = validate_state(self.state)
-        return TurnResult(
-            candidates=candidates,
-            report=report,
-            response=_build_response(report),
-            extractor=extractor_name,
-            fallback_reason=fallback_reason,
-        )
+        return self.core.run_turn(text=text, files=files)
 
     def export_metadata(self, include_reserved_analysis: bool = True) -> dict[str, Any]:
         result = self.prepare_metadata_export(include_reserved_analysis=include_reserved_analysis)
@@ -117,20 +68,6 @@ class MetadataAgent:
         if export.ok and export.metadata is not None:
             Path(metadata_path).write_text(_to_json(export.metadata), encoding="utf-8")
         return report
-
-
-def _build_response(report: ValidationReport) -> str:
-    if report.conflicts:
-        return "发现字段存在冲突，请确认：" + "，".join(report.conflicts)
-    if report.missing_required:
-        return "当前仍缺少必要信息：" + "，".join(report.missing_required)
-    if report.missing_important:
-        return "必须字段已满足，但仍缺少重要信息，导出时会使用默认值：" + "，".join(report.missing_important)
-    if report.missing_optional:
-        return "必须字段已满足，部分非关键字段缺失，导出时会留空。"
-    if any(issue.level == "warning" for issue in report.issues):
-        return "元数据已基本完整，但仍有警告需要复核。"
-    return "元数据已通过校验，可以导出 qREST metadata.json。"
 
 
 def _to_json(data: dict[str, Any]) -> str:

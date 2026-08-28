@@ -5,7 +5,7 @@ from pathlib import Path
 
 from qrest_agent.core.exporter import prepare_metadata_export
 from qrest_agent.core.metadata_policy import channel_key_importance, field_policy
-from qrest_agent.core.models import Candidate
+from qrest_agent.core.models import Candidate, Evidence
 from qrest_agent.core.path import get_path
 from qrest_agent.core.schema import QREST_EXTENSION_POLICY, QREST_FIELD_SPECS, QREST_REQUIRED_PATHS
 from qrest_agent.core.state import MetadataState
@@ -90,17 +90,19 @@ def test_metadata_policy_is_loaded_from_annotated_example(artifact_dir: Path) ->
 
 def test_export_allows_defaults_for_important_and_blanks_for_optional_fields(artifact_dir: Path) -> None:
     state = MetadataState.empty()
+    evidence = [Evidence(source_id="test", text="manual candidate")]
     for candidate in [
-        Candidate(field_path="BuildingInfo.ElevationNum", value=1, status="confirmed"),
-        Candidate(field_path="BuildingInfo.Elevation", value=[0.0], status="confirmed"),
-        Candidate(field_path="InstrumentInfo.ChannelNum", value=1, status="confirmed"),
+        Candidate(field_path="BuildingInfo.ElevationNum", value=1, status="confirmed", evidence=evidence),
+        Candidate(field_path="BuildingInfo.Elevation", value=[0.0], status="confirmed", evidence=evidence),
+        Candidate(field_path="InstrumentInfo.ChannelNum", value=1, status="confirmed", evidence=evidence),
         Candidate(
             field_path="InstrumentInfo.Channels",
             value=[{"ChannelNo": 1, "Azimuth": 90.0, "LocationXYZ": [0.0, 0.0, 0.0]}],
             status="confirmed",
+            evidence=evidence,
         ),
-        Candidate(field_path="DataInfo.NPTS", value=30000, status="confirmed"),
-        Candidate(field_path="DataInfo.DT", value=0.02, status="confirmed"),
+        Candidate(field_path="DataInfo.NPTS", value=30000, status="confirmed", evidence=evidence),
+        Candidate(field_path="DataInfo.DT", value=0.02, status="confirmed", evidence=evidence),
     ]:
         state.submit(candidate)
 
