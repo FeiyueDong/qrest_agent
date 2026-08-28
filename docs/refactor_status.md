@@ -25,12 +25,13 @@
 - [x] **Phase 4：Skill 系统（核心部分）**
   - 新增专业知识 Skill：`metadata` / `building_info` / `instrument_info` / `data_info`
     （字段含义、允许的确定性推导、必须询问项、冲突处理、禁止行为）；
-  - 待建：`sensor_layout`（测点布置判断）与更多专项 Skill。
+  - `sensor_layout`（测点布置判断）已补齐；更多专项 Skill 按需增加。
 - [x] **Phase 5：Tool 系统（核心部分）**
   - 注册确定性工具：`read_document` / `calculate_frequency` / `calculate_bounding_box` /
     `normalize_azimuth` / `derive_elevation_profile` / `derive_channel_layout` /
     `derive_counts` / `validate_metadata`；
-  - 待建：`table_reader`（通道表读取）、单位归一化工具与 metadata writer。
+  - `table_reader`（通道表解析）与 `metadata_writer`（写 JSON）已补齐；
+    单位归一化按需增加。
 - [x] **Phase 6：Agent Loop（核心循环）**
   - `QrestAgent.run_turn` 落地自主循环：理解 → LLM 规划（`plan`，规则兜底）
     → 执行 Tool（`execute_plan`，如 read_document 读取后直接进入提取）

@@ -197,13 +197,14 @@ The LLM layer only produces `Candidate` records. The deterministic core owns:
 
 This is deliberate: when key information is missing, the agent should report the missing fields and ask the user for more evidence instead of inventing engineering values.
 
-## Architecture Refactor Status (Phase 1-2)
+## Architecture Refactor Status (Phase 1-7 complete)
 
-Per [docs/qrest-agent 架构重构方案.md](docs/qrest-agent%20架构重构方案.md), the project is migrating from a fixed-pipeline design to an agent-led architecture:
+Per [docs/qrest-agent 架构重构方案.md](docs/qrest-agent%20架构重构方案.md), the project has been rebuilt from a fixed-pipeline design into an agent-led architecture:
 
-- `qrest_agent.state.WorkingState` (new): canonical working state. Every fact is stored as `value + status + evidence (+ derived_from)` with statuses `missing / extracted / uncertain / derived / inferred / confirmed / conflict`. `inferred` and `uncertain` never enter final metadata by default, and export requires evidence.
-- `qrest_agent.agent.agent.QrestAgent` (new): the Phase 1 main agent. It owns the Working State, decides the next action (`ask_missing / resolve_conflicts / review_warnings / ready`), and runs the "understand → extract → update state → validate → decide" loop. Its system prompt (`AGENT_SYSTEM_PROMPT`) defines the agent's decision authority and anti-hallucination rules.
-- `MetadataAgent` / `MetadataState` are now transitional facades over `QrestAgent` / `WorkingState`; they keep the old API working while Phase 3 splits the remaining modules.
-- Evidence requirement: `WorkingState.to_metadata()` (and the facade) only export values whose status is exportable AND that carry evidence.
+- `qrest_agent.state.WorkingState`: canonical working state. Every fact is stored as `value + status + evidence (+ derived_from)` with statuses `missing / extracted / uncertain / derived / inferred / confirmed / conflict`. `inferred` and `uncertain` never enter final metadata, and export requires evidence.
+- `qrest_agent.agent.agent.QrestAgent`: the single main agent. It owns the Working State, Skills and Tools, plans each turn (LLM planning with rule fallback), executes tools (`read_document`, calculators, `table_reader`, `metadata_writer`, qREST conversion), runs deterministic derivations, consults knowledge skills when deciding, and never bypasses the Validator.
+- Knowledge skills under `resources/skills/`: `metadata`, `building_info`, `instrument_info`, `data_info`, `sensor_layout`, plus the `qrest_data_generation` / `qrest_data_loading` workflow skills.
+- Validation: schema, required-field, consistency, conflict and evidence checks; export policy annotates every managed field as `blocked / defaulted / blank / evidenced`.
+- The 7 acceptance criteria from plan section 14 are covered by `tests/test_acceptance.py`.
 
 Phase tracking lives in [docs/refactor_status.md](docs/refactor_status.md).

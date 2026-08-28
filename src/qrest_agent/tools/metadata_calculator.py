@@ -12,6 +12,7 @@ from __future__ import annotations
 Agent 或规则提取器应先把文本中的参数解析出来，再调用这些函数。
 """
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -176,6 +177,70 @@ def build_channel_layout(
             channels.append(channel)
             channel_no += 1
     return channels
+
+
+def parse_channel_table(rows: list[str], *, delimiter: str = ",") -> list[dict[str, Any]]:
+    """把表格式行文本解析为通道配置列表（第一行为表头）。
+
+    列名与 qREST 通道字段对应（ChannelNo/ChannelID/Measurand/Scale/Azimuth/
+    LocationXYZ/DeviceType 等）；数值列自动类型化，LocationXYZ 支持 JSON 数组。
+    """
+    if not rows:
+        return []
+    header = _split_table_row(rows[0], delimiter)
+    channels: list[dict[str, Any]] = []
+    for row in rows[1:]:
+        if not row.strip():
+            continue
+        values = _split_table_row(row, delimiter)
+        channel: dict[str, Any] = {}
+        for index, key in enumerate(header):
+            if not key:
+                continue
+            raw = values[index] if index < len(values) else ""
+            channel[key] = _coerce_table_value(key, raw)
+        if "ChannelNo" in channel:
+            channels.append(channel)
+    return channels
+
+
+def _split_table_row(row: str, delimiter: str) -> list[str]:
+    """按分隔符拆分表格行，但括号（JSON 数组/对象）内部的逗号不拆分。"""
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for char in row:
+        if char in "[({":
+            depth += 1
+        elif char in "])}":
+            depth = max(0, depth - 1)
+        if char == delimiter and depth == 0:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    parts.append("".join(current))
+    return [part.strip() for part in parts]
+
+
+def _coerce_table_value(key: str, raw: str) -> Any:
+    if not raw:
+        return None
+    if key in {"ChannelNo", "ElevationNum", "ChannelNum", "NPTS"}:
+        return int(float(raw))
+    if key in {"Scale", "Azimuth", "Longitude", "Latitude", "NorthAngle", "DT"}:
+        return float(raw)
+    if key == "LocationXYZ":
+        stripped = raw.strip()
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, list):
+                    return parsed
+            except ValueError:
+                pass
+        return [float(part) for part in stripped.replace("[", "").replace("]", "").split(";") if part.strip() != ""]
+    return raw
 
 
 def _round_m(value: float, digits: int = 3) -> float:

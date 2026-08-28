@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -16,6 +17,7 @@ from qrest_agent.tools.metadata_calculator import (
     derive_elevation_num,
     derive_elevation_profile,
     normalize_azimuth,
+    parse_channel_table,
 )
 from qrest_agent.tools.qrest_data_tools import QrestDataTools
 
@@ -123,6 +125,28 @@ class ToolRegistry:
                     },
                 ),
                 _counts_tool,
+            ),
+            "table_reader": (
+                ToolSpec(
+                    name="table_reader",
+                    description="Parse a channel configuration table (first row is the header) into a Channels list.",
+                    parameters={
+                        "rows": "List of table rows as strings.",
+                        "delimiter": "Optional column delimiter; defaults to comma.",
+                    },
+                ),
+                _table_reader_tool,
+            ),
+            "metadata_writer": (
+                ToolSpec(
+                    name="metadata_writer",
+                    description="Write a qREST metadata object to a JSON file and return the output path.",
+                    parameters={
+                        "metadata": "qREST metadata dict.",
+                        "output_path": "Path where metadata JSON should be written.",
+                    },
+                ),
+                _metadata_writer_tool,
             ),
             "validate_metadata": (
                 ToolSpec(
@@ -276,6 +300,18 @@ def _channel_layout_tool(
         per_floor_count=per_floor_count,
     )
     return {"channels": channels, "channel_num": len(channels)}
+
+
+def _table_reader_tool(rows: list[str], delimiter: str = ",") -> dict[str, Any]:
+    channels = parse_channel_table(rows, delimiter=delimiter)
+    return {"channels": channels, "channel_num": len(channels)}
+
+
+def _metadata_writer_tool(metadata: dict[str, Any], output_path: str) -> dict[str, Any]:
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"path": str(path)}
 
 
 def _counts_tool(elevations: list[Any] | None = None, channels: list[Any] | None = None) -> dict[str, Any]:

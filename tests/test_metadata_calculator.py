@@ -14,6 +14,7 @@ from qrest_agent.tools.metadata_calculator import (
     derive_elevation_num,
     derive_elevation_profile,
     normalize_azimuth,
+    parse_channel_table,
 )
 from tests.conftest import write_json
 
@@ -87,6 +88,24 @@ def test_build_channel_layout_requires_per_floor_count_of_three() -> None:
     assert channels == []
 
 
+def test_parse_channel_table_from_rows() -> None:
+    rows = [
+        "ChannelNo,ChannelID,Measurand,Scale,Azimuth,LocationXYZ",
+        "1,X1,Acceleration,1.0,90.0,[0.0, -4.2, -2.6]",
+        "2,X2,Acceleration,1.0,0.0,[0.0, -4.2, 0.0]",
+        "",
+    ]
+    channels = parse_channel_table(rows)
+
+    assert len(channels) == 2
+    assert channels[0]["ChannelNo"] == 1
+    assert channels[0]["ChannelID"] == "X1"
+    assert channels[0]["Scale"] == 1.0
+    assert channels[0]["Azimuth"] == 90.0
+    assert channels[0]["LocationXYZ"] == [0.0, -4.2, -2.6]
+    assert channels[1]["LocationXYZ"] == [0.0, -4.2, 0.0]
+
+
 def test_derive_counts_and_azimuth_normalization() -> None:
     assert derive_elevation_num([0.0, 4.5, 7.8]) == 3
     assert derive_channel_num([{}, {}, {}]) == 3
@@ -143,6 +162,27 @@ def test_calculation_tools_are_registered_and_executable(tmp_path: Path) -> None
     assert counts == {"ElevationNum": 2, "ChannelNum": 2}
 
 
+def test_table_reader_and_metadata_writer_tools(tmp_path: Path) -> None:
+    registry = ToolRegistry(artifact_root=tmp_path / "artifacts")
+
+    table = registry.execute(
+        "table_reader",
+        {"rows": ["ChannelNo,Measurand,Scale,Azimuth", "1,Acceleration,1.0,90.0", "2,Acceleration,1.0,0.0"]},
+    )
+    assert table["channel_num"] == 2
+    assert table["channels"][0]["ChannelNo"] == 1
+    assert table["channels"][1]["Azimuth"] == 0.0
+
+    output = tmp_path / "written_metadata.json"
+    written = registry.execute(
+        "metadata_writer",
+        {"metadata": {"Header": "qREST_DATA", "Units": ["m", "s"]}, "output_path": str(output)},
+    )
+    assert output.exists()
+    assert written["path"] == str(output)
+    assert json.loads(output.read_text(encoding="utf-8"))["Header"] == "qREST_DATA"
+
+
 def test_read_document_tool_returns_chunks() -> None:
     registry = ToolRegistry()
     result = registry.execute(
@@ -164,7 +204,7 @@ def test_knowledge_skills_are_discoverable_and_authoritative(artifact_dir: Path)
     registry = SkillRegistry()
     skills = {
         name: registry.load(name)
-        for name in ("metadata", "building_info", "instrument_info", "data_info")
+        for name in ("metadata", "building_info", "instrument_info", "data_info", "sensor_layout")
     }
 
     write_json(
@@ -179,10 +219,12 @@ def test_knowledge_skills_are_discoverable_and_authoritative(artifact_dir: Path)
         "metadata",
         "qrest_data_generation",
         "qrest_data_loading",
+        "sensor_layout",
     ]
     assert "必须" in skills["metadata"].instructions
     assert "ElevationNum = len(Elevation)" in skills["building_info"].instructions
     assert "ChannelNum = len(Channels)" in skills["instrument_info"].instructions
     assert "Frequency = 1 / DT" in skills["data_info"].instructions
+    assert "derive_channel_layout" in skills["sensor_layout"].instructions
     for skill in skills.values():
         assert "禁止" in skill.instructions
