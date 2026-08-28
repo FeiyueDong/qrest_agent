@@ -4,15 +4,14 @@ from pathlib import Path
 
 from qrest_agent.core.exporter import prepare_metadata_export
 from qrest_agent.core.models import Candidate
-from qrest_agent.core.state import MetadataState
 from qrest_agent.core.validator import validate_state
+from qrest_agent.state import WorkingState
 from qrest_agent.state.evidence import Evidence
-from qrest_agent.state.working_state import WorkingState
 from tests.conftest import write_json
 
 
 def test_required_field_without_evidence_blocks_validation_and_export(artifact_dir: Path) -> None:
-    state = MetadataState.empty()
+    state = WorkingState.empty()
     state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="NoEvidence", status="confirmed"))
 
     report = validate_state(state)
@@ -35,7 +34,7 @@ def test_required_field_without_evidence_blocks_validation_and_export(artifact_d
 
 
 def test_field_with_evidence_passes_evidence_validation() -> None:
-    state = MetadataState.empty()
+    state = WorkingState.empty()
     state.submit(
         Candidate(
             field_path="BuildingInfo.ProjectName",
@@ -63,7 +62,7 @@ def test_working_state_evidence_gaps_feed_validator() -> None:
 
 
 def test_conflict_issue_reports_alternative_count(artifact_dir: Path) -> None:
-    state = MetadataState.empty()
+    state = WorkingState.empty()
     state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="A", evidence=[Evidence(source_id="doc1")]))
     state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="B", evidence=[Evidence(source_id="doc2")]))
 
@@ -75,7 +74,7 @@ def test_conflict_issue_reports_alternative_count(artifact_dir: Path) -> None:
 
 
 def test_export_annotates_defaulted_and_blank_fields(artifact_dir: Path) -> None:
-    state = MetadataState.empty()
+    state = WorkingState.empty()
     evidence = [Evidence(source_id="test", text="manual")]
     for candidate in [
         Candidate(field_path="BuildingInfo.ElevationNum", value=1, status="confirmed", evidence=evidence),

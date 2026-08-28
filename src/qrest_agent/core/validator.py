@@ -6,11 +6,11 @@ from qrest_agent.core.models import ValidationIssue, ValidationReport
 from qrest_agent.core.metadata_policy import channel_key_importance, channel_policy_keys, field_policy, is_blank
 from qrest_agent.core.path import get_path
 from qrest_agent.core.schema import QREST_REQUIRED_PATHS
-from qrest_agent.core.state import MetadataState
+from qrest_agent.state import WorkingState
 from qrest_agent.state.working_state import EXPORTABLE_STATUSES
 
 
-def validate_state(state: MetadataState) -> ValidationReport:
+def validate_state(state: Any) -> ValidationReport:
     metadata = state.to_metadata()
     missing_required: list[str] = []
     missing_important: list[str] = []
@@ -77,7 +77,7 @@ def _validate_evidence(state: Any, issues: list[ValidationIssue]) -> list[str]:
 
 
 def validate_metadata(metadata: dict[str, Any]) -> ValidationReport:
-    return validate_state(MetadataState.from_metadata(metadata))
+    return validate_state(WorkingState.from_metadata(metadata, paths=QREST_REQUIRED_PATHS))
 
 
 def _validate_root(metadata: dict[str, Any], issues: list[ValidationIssue]) -> None:

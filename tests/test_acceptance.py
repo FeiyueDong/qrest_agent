@@ -5,7 +5,6 @@ from typing import Any
 
 from qrest_agent.agent.agent import QrestAgent
 from qrest_agent.core.exporter import prepare_metadata_export
-from qrest_agent.core.state import MetadataState
 from qrest_agent.core.validator import validate_state
 from qrest_agent.resources import qrest_examples_root
 from qrest_agent.state.evidence import Evidence
@@ -134,13 +133,13 @@ def test_acceptance_7_export_only_when_required_fields_ready(artifact_dir: Path)
     ready_agent = QrestAgent()
     ready_agent.run_turn(files=[qrest_examples_root() / "kunming2" / "metadata.json"])
     assert validate_state(ready_agent.working_state).ready
-    ready_export = prepare_metadata_export(MetadataState(working=ready_agent.working_state))
+    ready_export = prepare_metadata_export(ready_agent.working_state)
     assert ready_export.ok
     assert ready_export.metadata is not None
 
     blocked_agent = QrestAgent()
     blocked_agent.run_turn("项目名称为 DemoBuilding。")
-    blocked_export = prepare_metadata_export(MetadataState(working=blocked_agent.working_state))
+    blocked_export = prepare_metadata_export(blocked_agent.working_state)
     assert not blocked_export.ok
     assert "BuildingInfo.Elevation" in blocked_export.blocked_fields
 

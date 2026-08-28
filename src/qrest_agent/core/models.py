@@ -4,11 +4,6 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from qrest_agent.state.evidence import Evidence
-from qrest_agent.state.working_state import Alternative, FieldState, FieldStatus
-
-# 兼容别名（Phase 2 过渡）：新的 Working State 字段记录即 FieldState。
-FieldRecord = FieldState
-RecordStatus = FieldStatus
 
 CandidateStatus = Literal[
     "extracted",

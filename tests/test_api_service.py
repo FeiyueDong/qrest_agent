@@ -127,7 +127,7 @@ def test_api_service_exports_weighted_metadata(tmp_path: Path, artifact_dir: Pat
         Candidate(field_path="DataInfo.NPTS", value=30000, status="confirmed", evidence=evidence),
         Candidate(field_path="DataInfo.DT", value=0.02, status="confirmed", evidence=evidence),
     ]:
-        session.agent.state.submit(candidate)
+        session.agent.working_state.submit(candidate)
 
     result = service.export_metadata("export-session")
     metadata_text = service.read_artifact_text("export-session", "metadata.json")["text"]

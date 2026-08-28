@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from qrest_agent.agent.agent import QrestAgent
 from qrest_agent.agent.dialogue import ChatSession
-from qrest_agent.agent.metadata_agent import MetadataAgent
 from qrest_agent.agent.tool_registry import ToolRegistry
 from qrest_agent.cli import _load_cli_defaults, main
 from qrest_agent.core.models import Candidate
@@ -24,8 +24,8 @@ def test_chat_session_extracts_and_reports_missing_fields(artifact_dir: Path) ->
     write_text(artifact_dir / "dialogue" / "basic_state.txt", state_result.response)
 
     assert "本轮提取到" in result.response
-    assert "BuildingInfo.ProjectName" in session.agent.state.records
-    assert "DataInfo.DT" in session.agent.state.records
+    assert "BuildingInfo.ProjectName" in session.agent.working_state.records
+    assert "DataInfo.DT" in session.agent.working_state.records
     assert not result.report.ready
     assert "provider=rule" in provider_result.response
     assert "当前已知字段" in state_result.response
@@ -38,7 +38,7 @@ def test_chat_session_confirm_command_updates_state(artifact_dir: Path) -> None:
 
     write_json(artifact_dir / "dialogue" / "confirm_command_result.json", result.to_dict())
 
-    record = session.agent.state.records["DataInfo.NPTS"]
+    record = session.agent.working_state.records["DataInfo.NPTS"]
     assert record.value == 30000
     assert record.status == "confirmed"
     assert "已确认 DataInfo.NPTS" in result.response
@@ -49,16 +49,16 @@ def test_chat_session_confirm_command_accepts_json_values() -> None:
 
     session.handle('/confirm BuildingInfo.StructuralFootprint.Parameters \'{"Length": 42.0, "Width": 25.2}\'')
 
-    record = session.agent.state.records["BuildingInfo.StructuralFootprint.Parameters"]
+    record = session.agent.working_state.records["BuildingInfo.StructuralFootprint.Parameters"]
     assert record.value == {"Length": 42.0, "Width": 25.2}
 
 
 def test_chat_session_resolves_all_conflicts_with_natural_language(artifact_dir: Path) -> None:
     session = ChatSession()
-    session.agent.state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="OldName", confidence=0.8))
-    session.agent.state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="NewName", confidence=0.9))
-    session.agent.state.submit(Candidate(field_path="DataInfo.EventName", value="OLD_EVENT", confidence=0.8))
-    session.agent.state.submit(Candidate(field_path="DataInfo.EventName", value="NEW_EVENT", confidence=0.9))
+    session.agent.working_state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="OldName", confidence=0.8))
+    session.agent.working_state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="NewName", confidence=0.9))
+    session.agent.working_state.submit(Candidate(field_path="DataInfo.EventName", value="OLD_EVENT", confidence=0.8))
+    session.agent.working_state.submit(Candidate(field_path="DataInfo.EventName", value="NEW_EVENT", confidence=0.9))
 
     result = session.handle("冲突部分全部更新为候选值")
 
@@ -66,9 +66,9 @@ def test_chat_session_resolves_all_conflicts_with_natural_language(artifact_dir:
 
     assert result.command == "resolve_conflicts"
     assert not result.report.conflicts
-    assert session.agent.state.records["BuildingInfo.ProjectName"].value == "NewName"
-    assert session.agent.state.records["DataInfo.EventName"].value == "NEW_EVENT"
-    assert session.agent.state.records["BuildingInfo.ProjectName"].status == "confirmed"
+    assert session.agent.working_state.records["BuildingInfo.ProjectName"].value == "NewName"
+    assert session.agent.working_state.records["DataInfo.EventName"].value == "NEW_EVENT"
+    assert session.agent.working_state.records["BuildingInfo.ProjectName"].status == "confirmed"
     assert "2 个冲突字段" in result.response
 
 
@@ -84,20 +84,20 @@ def test_chat_session_uses_llm_action_interpreter_for_conflict_resolution(artifa
             "reason": "user asks to use the newly imported version",
         }
     )
-    session = ChatSession(MetadataAgent(llm_client=client))
-    session.agent.state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="OldName", confidence=0.8))
-    session.agent.state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="NewName", confidence=0.9))
+    session = ChatSession(QrestAgent(llm_client=client))
+    session.agent.working_state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="OldName", confidence=0.8))
+    session.agent.working_state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="NewName", confidence=0.9))
 
     result = session.handle("请把所有存在差异的字段统一选择新导入的版本")
 
     write_json(artifact_dir / "dialogue" / "llm_action_conflict_resolution.json", result.to_dict())
 
     assert result.command == "resolve_conflicts"
-    assert session.agent.state.records["BuildingInfo.ProjectName"].value == "NewName"
-    assert session.agent.state.records["BuildingInfo.ProjectName"].status == "confirmed"
+    assert session.agent.working_state.records["BuildingInfo.ProjectName"].value == "NewName"
+    assert session.agent.working_state.records["BuildingInfo.ProjectName"].status == "confirmed"
     assert "动作解释来源：llm" in result.response
     assert client.requests
-    assert "current_conflicts" in client.requests[0][1]["content"]
+    assert any("current_conflicts" in messages[1]["content"] for messages in client.requests)
 
 
 def test_chat_session_uses_llm_action_interpreter_for_field_confirmation(artifact_dir: Path) -> None:
@@ -112,15 +112,15 @@ def test_chat_session_uses_llm_action_interpreter_for_field_confirmation(artifac
             "reason": "user confirms a numeric field",
         }
     )
-    session = ChatSession(MetadataAgent(llm_client=client))
+    session = ChatSession(QrestAgent(llm_client=client))
 
     result = session.handle("采样点数按 30000 处理")
 
     write_json(artifact_dir / "dialogue" / "llm_action_field_confirmation.json", result.to_dict())
 
     assert result.command == "confirm_fields"
-    assert session.agent.state.records["DataInfo.NPTS"].value == 30000
-    assert session.agent.state.records["DataInfo.NPTS"].status == "confirmed"
+    assert session.agent.working_state.records["DataInfo.NPTS"].value == 30000
+    assert session.agent.working_state.records["DataInfo.NPTS"].status == "confirmed"
     assert "动作解释来源：llm" in result.response
 
 
@@ -165,11 +165,11 @@ def test_chat_session_file_command_ingests_document(artifact_dir: Path) -> None:
     write_json(artifact_dir / "dialogue" / "file_command_result.json", result.to_dict())
 
     assert result.report.ready
-    assert "BuildingInfo.ProjectName" in session.agent.state.records
+    assert "BuildingInfo.ProjectName" in session.agent.working_state.records
 
 
 def test_chat_session_tool_commands_use_registry(tmp_path: Path, artifact_dir: Path) -> None:
-    agent = MetadataAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
+    agent = QrestAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
     session = ChatSession(agent, session_id="dialogue-tools")
 
     tools_result = session.handle("/tools")
@@ -209,7 +209,7 @@ def test_chat_session_help_is_skill_first(artifact_dir: Path) -> None:
 
 
 def test_chat_session_natural_language_preflights_qrest_generation(tmp_path: Path, artifact_dir: Path) -> None:
-    agent = MetadataAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
+    agent = QrestAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
     session = ChatSession(agent, session_id="dialogue-preflight")
     example_dir = qrest_examples_root() / "kunming2"
 
@@ -230,7 +230,7 @@ def test_chat_session_natural_language_preflights_qrest_generation(tmp_path: Pat
 
 
 def test_chat_session_natural_language_generates_from_current_metadata(tmp_path: Path, artifact_dir: Path) -> None:
-    agent = MetadataAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
+    agent = QrestAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
     session = ChatSession(agent, session_id="dialogue-generate-current")
     example_dir = qrest_examples_root() / "kunming2"
     session.handle(f"/file {example_dir / 'metadata.json'}")
@@ -255,7 +255,7 @@ def test_chat_session_natural_language_generates_from_current_metadata(tmp_path:
 
 
 def test_chat_session_natural_language_generation_missing_data_path_blocks(tmp_path: Path, artifact_dir: Path) -> None:
-    agent = MetadataAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
+    agent = QrestAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
     session = ChatSession(agent, session_id="dialogue-missing-data")
 
     result = session.handle("用当前项目状态生成 qREST")
@@ -275,7 +275,7 @@ def test_chat_session_natural_language_generation_missing_data_path_blocks(tmp_p
 
 
 def test_chat_session_natural_language_loads_qrest(tmp_path: Path, artifact_dir: Path) -> None:
-    agent = MetadataAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
+    agent = QrestAgent(tool_registry=ToolRegistry(artifact_root=tmp_path / "artifacts"))
     session = ChatSession(agent, session_id="dialogue-loading")
     example_dir = qrest_examples_root() / "kunming2"
 
@@ -291,7 +291,7 @@ def test_chat_session_natural_language_loads_qrest(tmp_path: Path, artifact_dir:
     assert result.tool_result is not None
     assert result.tool_result["load"]["ok"]
     assert result.report.ready
-    assert "BuildingInfo.ProjectName" in session.agent.state.records
+    assert "BuildingInfo.ProjectName" in session.agent.working_state.records
     assert "已将解析出的 metadata 导入当前会话" in result.response
     assert any(item["name"] == "qrest_data_loading_task_log.json" for item in artifacts)
 

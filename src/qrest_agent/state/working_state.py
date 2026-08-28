@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from qrest_agent.core.path import get_path, set_path
+from qrest_agent.core.schema import DEFAULT_METADATA
 from qrest_agent.state.evidence import Evidence
 
 FieldStatus = Literal[
@@ -116,7 +117,7 @@ class WorkingState:
     def fields(self) -> dict[str, FieldState]:
         return self._fields
 
-    #: 与旧 MetadataState.records 同名的兼容访问（validator 仍按 records 读取）。
+    #: validator/exporter 统一按 records 读取（与 WorkingState.fields 同一份数据）。
     @property
     def records(self) -> dict[str, FieldState]:
         return self._fields
@@ -317,6 +318,28 @@ class WorkingState:
 
     def to_audit_dict(self) -> dict[str, Any]:
         return {path: state.to_dict() for path, state in sorted(self._fields.items())}
+
+    @classmethod
+    def empty(cls) -> "WorkingState":
+        """空会话状态：预置 Header/Version/Units 系统默认值（带 system_default 证据）。"""
+        state = cls()
+        state.seed_defaults(
+            {path: get_path(DEFAULT_METADATA, path) for path in ("Header", "Version", "Units")}
+        )
+        return state
+
+    @classmethod
+    def from_metadata(
+        cls,
+        metadata: dict[str, Any],
+        *,
+        source_id: str = "metadata",
+        paths: list[str] | None = None,
+    ) -> "WorkingState":
+        """从完整 metadata 导入受管路径（确认态 + evidence）。"""
+        state = cls()
+        state.import_metadata(metadata, source_id=source_id, paths=paths)
+        return state
 
     def seed_defaults(
         self,

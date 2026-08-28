@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from qrest_agent.api.service import ApiService
+from qrest_agent.agent.agent import QrestAgent
 from qrest_agent.agent.dialogue import ChatSession
-from qrest_agent.agent.metadata_agent import MetadataAgent
 from qrest_agent.agent.tool_registry import ToolRegistry
 from qrest_agent.core.validator import validate_metadata
 from qrest_agent.ingestion.sources import SourceManager
@@ -142,14 +142,18 @@ def _validate(path: str) -> int:
 
 
 def _extract_text(args: argparse.Namespace) -> int:
-    agent = MetadataAgent(llm_client=_make_client(args))
+    agent = QrestAgent(llm_client=_make_client(args))
     result = agent.run_turn(text=args.text)
     print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     return 0
 
 
 def _chat(args: argparse.Namespace) -> int:
-    agent = MetadataAgent(llm_client=_make_client(args), tool_registry=ToolRegistry(args.artifact_root))
+    agent = QrestAgent(
+        llm_client=_make_client(args),
+        tool_registry=ToolRegistry(args.artifact_root),
+        session_id=args.session_id,
+    )
     runtime_info = _runtime_info(args)
     session = ChatSession(agent, session_id=args.session_id, runtime_info=runtime_info)
     print(_format_runtime_info(runtime_info))
@@ -188,7 +192,7 @@ def _web(args: argparse.Namespace) -> int:
 
 
 def _extract_file(path: str) -> int:
-    agent = MetadataAgent()
+    agent = QrestAgent()
     result = agent.run_turn(files=[path])
     print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     return 0
@@ -207,7 +211,7 @@ def _ingest_file(path: str) -> int:
 
 
 def _export_from_file(path: str, metadata_output: str, audit_output: str) -> int:
-    agent = MetadataAgent()
+    agent = QrestAgent()
     result = agent.run_turn(files=[path])
     report = agent.export_artifacts(metadata_output, audit_output)
     payload = {

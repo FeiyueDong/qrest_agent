@@ -3,7 +3,7 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-from qrest_agent.agent.metadata_agent import MetadataAgent
+from qrest_agent.agent.agent import QrestAgent
 from qrest_agent.ingestion.sources import SourceManager
 from tests.conftest import write_json, write_text
 
@@ -68,7 +68,7 @@ def test_docx_and_pdf_ingestion_extract_equivalent_key_text(artifact_dir: Path) 
 def test_agent_extracts_candidates_from_docx_and_pdf(artifact_dir: Path) -> None:
     outputs = {}
     for path in (DOCX_CASE, PDF_CASE):
-        agent = MetadataAgent()
+        agent = QrestAgent()
         result = agent.run_turn(files=[path])
         candidate_paths = {candidate.field_path for candidate in result.candidates}
         outputs[path.suffix.removeprefix(".")] = result.to_dict()

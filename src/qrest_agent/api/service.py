@@ -4,8 +4,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
+from qrest_agent.agent.agent import QrestAgent
 from qrest_agent.agent.dialogue import ChatSession
-from qrest_agent.agent.metadata_agent import MetadataAgent
 from qrest_agent.agent.tool_registry import ToolRegistry
 from qrest_agent.llm.clients import BaseLLMClient
 from qrest_agent.storage.artifacts import ArtifactManager
@@ -27,7 +27,11 @@ class ApiService:
         resolved = session_id or f"session-{uuid.uuid4().hex[:12]}"
         if resolved in self.sessions:
             raise ValueError(f"session already exists: {resolved}")
-        agent = MetadataAgent(llm_client=self._llm_client_factory(), tool_registry=ToolRegistry(self.artifacts.root))
+        agent = QrestAgent(
+            llm_client=self._llm_client_factory(),
+            tool_registry=ToolRegistry(self.artifacts.root),
+            session_id=resolved,
+        )
         session = ChatSession(agent, session_id=resolved, runtime_info=self.runtime_info)
         self.sessions[resolved] = session
         return session.to_dict()

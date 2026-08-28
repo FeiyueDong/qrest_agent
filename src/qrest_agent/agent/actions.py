@@ -5,9 +5,9 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from qrest_agent.core.schema import QREST_FIELD_SPECS_BY_PATH
-from qrest_agent.core.state import MetadataState
 from qrest_agent.core.validator import validate_state
 from qrest_agent.llm.clients import BaseLLMClient
+from qrest_agent.state import WorkingState
 
 ActionName = Literal["none", "resolve_conflicts", "confirm_field"]
 ConflictChoice = Literal["current", "alternative"]
@@ -36,7 +36,7 @@ class ActionInterpreter:
         self.client = client
         self.confidence_threshold = confidence_threshold
 
-    def interpret(self, text: str, state: MetadataState) -> ActionIntent:
+    def interpret(self, text: str, state: WorkingState) -> ActionIntent:
         if self.client is None:
             return _fallback_interpret(text)
 
@@ -53,7 +53,7 @@ class ActionInterpreter:
         return _sanitize_intent(intent, state)
 
 
-def should_interpret_action(text: str, state: MetadataState) -> bool:
+def should_interpret_action(text: str, state: WorkingState) -> bool:
     if validate_state(state).conflicts:
         return True
     compact = "".join(text.lower().split())
@@ -119,7 +119,7 @@ Safety rules:
 """
 
 
-def _build_action_messages(text: str, state: MetadataState) -> list[dict[str, str]]:
+def _build_action_messages(text: str, state: WorkingState) -> list[dict[str, str]]:
     report = validate_state(state)
     context = {
         "valid_field_paths": sorted(QREST_FIELD_SPECS_BY_PATH),
@@ -138,7 +138,7 @@ def _build_action_messages(text: str, state: MetadataState) -> list[dict[str, st
     ]
 
 
-def _conflict_summary(state: MetadataState, field_path: str) -> dict[str, Any]:
+def _conflict_summary(state: WorkingState, field_path: str) -> dict[str, Any]:
     record = state.records.get(field_path)
     if record is None:
         return {"field_path": field_path, "alternative_count": 0}
@@ -197,7 +197,7 @@ def _intent_from_model(data: dict[str, Any]) -> ActionIntent:
     )
 
 
-def _sanitize_intent(intent: ActionIntent, state: MetadataState) -> ActionIntent:
+def _sanitize_intent(intent: ActionIntent, state: WorkingState) -> ActionIntent:
     valid_paths = set(QREST_FIELD_SPECS_BY_PATH)
     report = validate_state(state)
     conflicts = set(report.conflicts)

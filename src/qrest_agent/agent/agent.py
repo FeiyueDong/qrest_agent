@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -12,10 +11,13 @@ from qrest_agent.agent.prompts import (
     AGENT_SYSTEM_PROMPT,
     PLANNING_SCHEMA_HINT,
 )
+from qrest_agent.agent.task_handlers import TaskHandlerRegistry, create_default_handler_registry
+from qrest_agent.agent.task_models import TaskIntent
+from qrest_agent.agent.tasks import detect_task_intent, intent_from_arguments, intent_to_arguments
 from qrest_agent.agent.tool_registry import ToolRegistry
+from qrest_agent.core.exporter import MetadataExportResult, prepare_metadata_export as _prepare_metadata_export
 from qrest_agent.core.models import Candidate, ValidationReport
-from qrest_agent.core.path import get_path
-from qrest_agent.core.schema import DEFAULT_METADATA, QREST_TRACKED_PATHS
+from qrest_agent.core.schema import QREST_TRACKED_PATHS
 from qrest_agent.core.validator import validate_state
 from qrest_agent.ingestion.sources import SourceChunk, SourceManager
 from qrest_agent.llm.clients import BaseLLMClient
@@ -23,8 +25,8 @@ from qrest_agent.skills import SkillRegistry
 from qrest_agent.state.evidence import Evidence
 from qrest_agent.state.working_state import EXPORTABLE_STATUSES, WorkingState
 
-AgentAction = Literal["resolve_conflicts", "ask_missing", "review_warnings", "ready"]
-PlanAction = Literal["extract", "tool", "ask", "export", "none"]
+AgentAction = Literal["resolve_conflicts", "ask_missing", "review_warnings", "ready", "task_done"]
+PlanAction = Literal["extract", "tool", "ask", "export", "none", "task"]
 
 #: 字段路径前缀 → 专业知识 Skill 名（Phase 6：决策前读取相关 Skill）。
 _SKILL_BY_PREFIX: tuple[tuple[str, str], ...] = (
@@ -60,6 +62,7 @@ class AgentPlan:
     tool_name: str | None = None
     tool_arguments: dict[str, Any] = field(default_factory=dict)
     skills: list[str] = field(default_factory=list)
+    skill_name: str | None = None
     reason: str = ""
     source: str = "rule"
 
@@ -69,6 +72,7 @@ class AgentPlan:
             "tool_name": self.tool_name,
             "tool_arguments": self.tool_arguments,
             "skills": list(self.skills),
+            "skill_name": self.skill_name,
             "reason": self.reason,
             "source": self.source,
         }
@@ -84,6 +88,7 @@ class TurnResult:
     fallback_reason: str | None = None
     tool_results: list[dict[str, Any]] = field(default_factory=list)
     plan: AgentPlan | None = None
+    task_result: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +100,7 @@ class TurnResult:
             "fallback_reason": self.fallback_reason,
             "tool_results": list(self.tool_results),
             "plan": self.plan.to_dict() if self.plan is not None else None,
+            "task_result": self.task_result,
         }
 
 
@@ -120,18 +126,15 @@ class QrestAgent:
         tool_registry: ToolRegistry | None = None,
         skill_registry: SkillRegistry | None = None,
         working_state: WorkingState | None = None,
+        session_id: str | None = None,
     ) -> None:
         self.llm_client = llm_client
         self.tools = tool_registry or ToolRegistry()
         self.skills = skill_registry or SkillRegistry()
-        self.working_state = working_state or WorkingState(
-            base_metadata=deepcopy(DEFAULT_METADATA),
-            tracked_paths=QREST_TRACKED_PATHS,
-        )
-        if working_state is None:
-            self.working_state.seed_defaults(
-                {path: get_path(DEFAULT_METADATA, path) for path in ("Header", "Version", "Units")}
-            )
+        self.session_id = session_id
+        self._handler_registry: TaskHandlerRegistry | None = None
+        self.working_state = working_state or WorkingState.empty()
+        self.working_state.tracked_paths = list(QREST_TRACKED_PATHS)
         self.sources = SourceManager()
         self.extractor = LLMExtractor(llm_client) if llm_client is not None else RuleBasedExtractor()
         self._skill_text_cache: dict[str, str] = {}
@@ -139,6 +142,13 @@ class QrestAgent:
     @property
     def system_prompt(self) -> str:
         return AGENT_SYSTEM_PROMPT
+
+    @property
+    def handlers(self) -> TaskHandlerRegistry:
+        """qREST 数据生成/加载 skill handlers（主 Agent 计划执行的确定性工作流）。"""
+        if self._handler_registry is None:
+            self._handler_registry = create_default_handler_registry(self, self.session_id or "default")
+        return self._handler_registry
 
     # ---- 理解 ----
 
@@ -153,7 +163,7 @@ class QrestAgent:
     def plan(self, text: str) -> AgentPlan:
         """生成回合计划：LLM 可用时由模型决策，否则规则兜底为 extract。"""
         if self.llm_client is None:
-            return AgentPlan(action="extract", reason="rule provider default", source="rule")
+            return _rule_plan(text)
         try:
             parsed = self.llm_client.complete_json(
                 _build_planning_messages(text, self),
@@ -197,6 +207,8 @@ class QrestAgent:
             chunks.extend(self.ingest_file(path))
 
         plan = self.plan(text or "")
+        if plan.action == "task":
+            return self._run_task(text or "", plan)
         tool_results: list[dict[str, Any]] = []
         if plan.action == "tool" and plan.tool_name:
             plan_result = self.execute_plan(plan)
@@ -249,8 +261,61 @@ class QrestAgent:
         decision.guidance = self._skill_guidance(decision)
         return decision
 
+    def _run_task(self, text: str, plan: AgentPlan) -> TurnResult:
+        intent = intent_from_arguments(plan.skill_name or "", plan.tool_arguments)
+        handler = self.handlers.get(plan.skill_name or "") if intent is not None else None
+        if handler is None or intent is None:
+            return TurnResult(
+                candidates=[],
+                report=validate_state(self.working_state),
+                response="任务无法执行：skill 或参数无效，请重试。",
+                decision=AgentDecision("ready", "invalid task plan", []),
+                extractor="task",
+                plan=plan,
+                fallback_reason="invalid task plan",
+            )
+        result = handler.handle(text, intent)
+        return TurnResult(
+            candidates=[],
+            report=result.report,
+            response=result.response,
+            decision=AgentDecision("task_done", f"task {result.command} executed", []),
+            extractor="task",
+            plan=plan,
+            task_result=result.tool_result,
+        )
+
     def can_export(self) -> bool:
         return validate_state(self.working_state).ready
+
+    def prepare_metadata_export(self, include_reserved_analysis: bool = True) -> MetadataExportResult:
+        return _prepare_metadata_export(self.working_state, include_reserved_analysis=include_reserved_analysis)
+
+    def export_metadata(self, include_reserved_analysis: bool = True) -> dict[str, Any]:
+        result = self.prepare_metadata_export(include_reserved_analysis=include_reserved_analysis)
+        if not result.ok or result.metadata is None:
+            blocked = ", ".join(result.blocked_fields)
+            raise ValueError(f"metadata cannot be exported; blocked=[{blocked}]")
+        return result.metadata
+
+    def export_audit(self) -> dict[str, Any]:
+        report = validate_state(self.working_state)
+        export = self.prepare_metadata_export()
+        return {
+            "ready": report.ready,
+            "validation": report.to_dict(),
+            "export": export.to_dict(include_metadata=False),
+            "records": self.working_state.to_audit_dict(),
+            "tool_specs": [spec.to_dict() for spec in self.tools.list_specs()],
+        }
+
+    def export_artifacts(self, metadata_path: str | Path, audit_path: str | Path) -> ValidationReport:
+        export = self.prepare_metadata_export()
+        report = export.report
+        Path(audit_path).write_text(_to_json(self.export_audit()), encoding="utf-8")
+        if export.ok and export.metadata is not None:
+            Path(metadata_path).write_text(_to_json(export.metadata), encoding="utf-8")
+        return report
 
     def to_metadata(self, require_evidence: bool = True) -> dict[str, Any]:
         return self.working_state.to_metadata(require_evidence=require_evidence)
@@ -403,6 +468,25 @@ def build_agent_response(
     return "\n".join(line for line in lines if line)
 
 
+def _rule_plan(text: str) -> AgentPlan:
+    """规则兜底规划：识别 qREST 数据加载/生成任务 → task；否则 extract。"""
+    intent = detect_task_intent(text)
+    if intent is not None:
+        return AgentPlan(
+            action="task",
+            skill_name=intent.skill_name,
+            tool_arguments=intent_to_arguments(intent),
+            skills=[intent.skill_name],
+            reason=f"detected task intent: {intent.name}",
+            source="rule",
+        )
+    return AgentPlan(action="extract", reason="rule provider default", source="rule")
+
+
+def _to_json(data: dict[str, Any]) -> str:
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
 def _build_planning_messages(text: str, agent: QrestAgent) -> list[dict[str, str]]:
     context = agent.context_summary()
     return [
@@ -431,11 +515,18 @@ def _plan_from_model(parsed: dict[str, Any], tools: ToolRegistry) -> AgentPlan:
         arguments = {}
     skills = [str(item) for item in parsed.get("skills", []) if isinstance(item, str)]
 
+    skill_name: str | None = None
     if action == "tool":
         known = {spec.name for spec in tools.list_specs()}
         if tool_name not in known:
             action = "extract"
             tool_name = None
+            arguments = {}
+    elif action == "task":
+        skill_name = parsed.get("skill") or parsed.get("skill_name")
+        if skill_name not in {"qrest_data_generation", "qrest_data_loading"}:
+            action = "extract"
+            skill_name = None
             arguments = {}
 
     return AgentPlan(
@@ -443,6 +534,7 @@ def _plan_from_model(parsed: dict[str, Any], tools: ToolRegistry) -> AgentPlan:
         tool_name=tool_name,
         tool_arguments=arguments,
         skills=skills,
+        skill_name=skill_name,
         reason=str(parsed.get("reason", "")),
         source="llm",
     )

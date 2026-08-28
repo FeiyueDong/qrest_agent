@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
-from qrest_agent.agent.metadata_agent import MetadataAgent
 from qrest_agent.agent.task_models import TaskExecutionResult, TaskIntent
+
+if TYPE_CHECKING:
+    from qrest_agent.agent.agent import QrestAgent
 from qrest_agent.core.models import Candidate
 from qrest_agent.core.validator import validate_state
 from qrest_agent.skills import SkillRegistry
@@ -38,7 +40,7 @@ class QrestDataGenerationHandler:
 
     def __init__(
         self,
-        agent: MetadataAgent,
+        agent: QrestAgent,
         session_id: str,
         skill_registry: SkillRegistry | None = None,
     ) -> None:
@@ -140,7 +142,7 @@ class QrestDataGenerationHandler:
     def _result(self, response: str, payload: dict[str, Any]) -> TaskExecutionResult:
         return TaskExecutionResult(
             response=response,
-            report=validate_state(self.agent.state),
+            report=validate_state(self.agent.working_state),
             command=self.name,
             tool_result=payload,
         )
@@ -167,7 +169,7 @@ class QrestDataGenerationHandler:
 
 
 def create_default_handler_registry(
-    agent: MetadataAgent,
+    agent: QrestAgent,
     session_id: str,
     skill_registry: SkillRegistry | None = None,
 ) -> TaskHandlerRegistry:
@@ -257,7 +259,7 @@ class QrestDataLoadingHandler:
 
     def __init__(
         self,
-        agent: MetadataAgent,
+        agent: QrestAgent,
         session_id: str,
         skill_registry: SkillRegistry | None = None,
     ) -> None:
@@ -309,7 +311,7 @@ class QrestDataLoadingHandler:
         self._write_task_log(text, skill.name, intent.mode, status, payload)
         return TaskExecutionResult(
             response=format_data_loading_response(load_result, imported_candidates, skill.name),
-            report=validate_state(self.agent.state),
+            report=validate_state(self.agent.working_state),
             command=self.name,
             tool_result=payload,
         )
@@ -317,7 +319,7 @@ class QrestDataLoadingHandler:
     def _result(self, response: str, payload: dict[str, Any]) -> TaskExecutionResult:
         return TaskExecutionResult(
             response=response,
-            report=validate_state(self.agent.state),
+            report=validate_state(self.agent.working_state),
             command=self.name,
             tool_result=payload,
         )

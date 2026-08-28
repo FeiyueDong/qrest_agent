@@ -6,8 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from qrest_agent.agent.actions import ActionIntent, ActionInterpreter, FieldUpdate, should_interpret_action
-from qrest_agent.agent.metadata_agent import MetadataAgent, TurnResult
-from qrest_agent.agent.tasks import TaskCoordinator
+from qrest_agent.agent.agent import QrestAgent, TurnResult
 from qrest_agent.core.models import Candidate, Evidence, ValidationReport
 from qrest_agent.core.schema import QREST_FIELD_SPECS_BY_PATH
 from qrest_agent.core.validator import validate_state
@@ -46,15 +45,16 @@ class DialogueResult:
 class ChatSession:
     def __init__(
         self,
-        agent: MetadataAgent | None = None,
+        agent: QrestAgent | None = None,
         session_id: str = "default",
         runtime_info: dict[str, Any] | None = None,
     ) -> None:
-        self.agent = agent or MetadataAgent()
+        self.agent = agent or QrestAgent(session_id=session_id)
+        if self.agent.session_id is None:
+            self.agent.session_id = session_id
         self.session_id = session_id
         self.runtime_info = runtime_info or {"provider": "rule", "model": None, "extractor": "rule"}
         self.action_interpreter = ActionInterpreter(getattr(self.agent, "llm_client", None))
-        self.task_coordinator = TaskCoordinator(self.agent, self.session_id)
         self.turns: list[DialogueTurn] = []
 
     def handle(self, message: str) -> DialogueResult:
@@ -65,12 +65,19 @@ class ChatSession:
         elif text.startswith("/"):
             result = self._handle_command(text)
         else:
-            result = self._handle_task(text)
-            if result is None:
+            turn_result = self.agent.run_turn(text=text)
+            if turn_result.task_result is not None:
+                result = DialogueResult(
+                    response=turn_result.response,
+                    report=turn_result.report,
+                    candidates=turn_result.candidates,
+                    command=turn_result.plan.skill_name if turn_result.plan else None,
+                    tool_result=turn_result.task_result,
+                )
+            else:
                 result = self._handle_natural_language_action(text)
-            if result is None:
-                turn_result = self.agent.run_turn(text=text)
-                result = _dialogue_from_agent_turn(turn_result, self.agent)
+                if result is None:
+                    result = _dialogue_from_agent_turn(turn_result, self.agent)
 
         self.turns.append(DialogueTurn(role="assistant", text=result.response, payload=result.to_dict()))
         return result
@@ -83,14 +90,14 @@ class ChatSession:
         return result
 
     def to_dict(self) -> dict[str, Any]:
-        report = validate_state(self.agent.state)
+        report = validate_state(self.agent.working_state)
         artifacts = self.agent.tools.artifacts.list(self.session_id)
-        skills = SkillRegistry().list_skills()
+        skills = self.agent.skills.list_skills()
         return {
             "session_id": self.session_id,
             "runtime": self.runtime_info,
             "report": report.to_dict(),
-            "records": self.agent.state.to_audit_dict(),
+            "records": self.agent.working_state.to_audit_dict(),
             "artifacts": artifacts,
             "skills": [
                 {
@@ -100,7 +107,7 @@ class ChatSession:
                 }
                 for skill in skills
             ],
-            "skill_handlers": self.task_coordinator.handlers.list_names(),
+            "skill_handlers": self.agent.handlers.list_names(),
             "task_logs": [item for item in artifacts if item["name"].endswith("_task_log.json")],
             "turns": [turn.to_dict() for turn in self.turns],
         }
@@ -121,7 +128,7 @@ class ChatSession:
         if command in {"/state", "/status"}:
             return self._command_result(_build_state_summary(self.agent), command=command)
         if command == "/missing":
-            return self._command_result(_build_missing_question(validate_state(self.agent.state)), command=command)
+            return self._command_result(_build_missing_question(validate_state(self.agent.working_state)), command=command)
         if command == "/conflicts":
             return self._command_result(_build_conflict_question(self.agent), command=command)
         if command == "/file":
@@ -155,15 +162,15 @@ class ChatSession:
             confidence=1.0,
             evidence=[Evidence(source_id="user_confirmation", location="chat", text=raw_value)],
         )
-        self.agent.state.submit(candidate)
-        report = validate_state(self.agent.state)
+        self.agent.working_state.submit(candidate)
+        report = validate_state(self.agent.working_state)
         response = f"已确认 {field_path} = {json.dumps(value, ensure_ascii=False)}。\n{_build_next_question(report, self.agent)}"
         return DialogueResult(response=response, report=report, candidates=[candidate], command=command)
 
     def _handle_natural_language_action(self, text: str) -> DialogueResult | None:
-        if not should_interpret_action(text, self.agent.state):
+        if not should_interpret_action(text, self.agent.working_state):
             return None
-        intent = self.action_interpreter.interpret(text, self.agent.state)
+        intent = self.action_interpreter.interpret(text, self.agent.working_state)
         if intent.action == "none":
             return None
         if intent.action == "resolve_conflicts":
@@ -172,19 +179,8 @@ class ChatSession:
             return self._confirm_fields_from_intent(text, intent)
         return None
 
-    def _handle_task(self, text: str) -> DialogueResult | None:
-        result = self.task_coordinator.handle(text)
-        if result is None:
-            return None
-        return DialogueResult(
-            response=result.response,
-            report=result.report,
-            command=result.command,
-            tool_result=result.tool_result,
-        )
-
     def _resolve_conflicts_from_intent(self, text: str, intent: ActionIntent) -> DialogueResult:
-        report = validate_state(self.agent.state)
+        report = validate_state(self.agent.working_state)
         if not report.conflicts:
             return self._command_result("当前没有冲突字段需要处理。", command="resolve_conflicts")
 
@@ -192,7 +188,7 @@ class ChatSession:
         candidates: list[Candidate] = []
         skipped: list[str] = []
         for field_path in field_paths:
-            record = self.agent.state.records.get(field_path)
+            record = self.agent.working_state.records.get(field_path)
             if record is None:
                 skipped.append(field_path)
                 continue
@@ -217,10 +213,10 @@ class ChatSession:
                     Evidence(source_id="user_confirmation", location="chat", text=text),
                 ],
             )
-            self.agent.state.submit(candidate)
+            self.agent.working_state.submit(candidate)
             candidates.append(candidate)
 
-        report = validate_state(self.agent.state)
+        report = validate_state(self.agent.working_state)
         choice_text = "候选值" if intent.choice == "alternative" else "当前值"
         lines = [f"已根据你的描述将 {len(candidates)} 个冲突字段确认采用{choice_text}。"]
         if intent.source:
@@ -240,10 +236,10 @@ class ChatSession:
             if candidate is None:
                 skipped.append(update.field_path)
                 continue
-            self.agent.state.submit(candidate)
+            self.agent.working_state.submit(candidate)
             candidates.append(candidate)
 
-        report = validate_state(self.agent.state)
+        report = validate_state(self.agent.working_state)
         lines = [f"已根据你的描述确认 {len(candidates)} 个字段。"]
         if intent.source:
             lines.append(f"动作解释来源：{intent.source}。")
@@ -277,7 +273,7 @@ class ChatSession:
         else:
             lines.append("- 当前未注册 repo-native skill。")
         lines.append("已注册 skill handlers：")
-        for name in self.task_coordinator.handlers.list_names():
+        for name in self.agent.handlers.list_names():
             lines.append(f"- {name}")
         lines.append("Deterministic tools：")
         for spec in self.agent.tools.list_specs():
@@ -323,7 +319,7 @@ class ChatSession:
     def _tool_result(self, tool_name: str, result: ToolResult, command: str) -> DialogueResult:
         return DialogueResult(
             response=_format_tool_result(tool_name, result),
-            report=validate_state(self.agent.state),
+            report=validate_state(self.agent.working_state),
             command=command,
             tool_result=result.to_dict(),
         )
@@ -357,10 +353,10 @@ class ChatSession:
         )
 
     def _command_result(self, response: str, command: str | None = None) -> DialogueResult:
-        return DialogueResult(response=response, report=validate_state(self.agent.state), command=command)
+        return DialogueResult(response=response, report=validate_state(self.agent.working_state), command=command)
 
 
-def _dialogue_from_agent_turn(turn: TurnResult, agent: MetadataAgent) -> DialogueResult:
+def _dialogue_from_agent_turn(turn: TurnResult, agent: QrestAgent) -> DialogueResult:
     extracted = _format_candidates(turn.candidates)
     next_question = _build_next_question(turn.report, agent)
     fallback = f"注意：{turn.fallback_reason}，已回退到规则抽取。\n" if turn.fallback_reason else ""
@@ -443,7 +439,7 @@ def _build_runtime_summary(runtime_info: dict[str, Any]) -> str:
     return f"当前运行模式：provider={provider}; extractor={extractor}"
 
 
-def _build_next_question(report: ValidationReport, agent: MetadataAgent) -> str:
+def _build_next_question(report: ValidationReport, agent: QrestAgent) -> str:
     if report.conflicts:
         return _build_conflict_question(agent)
     if report.missing_required:
@@ -487,13 +483,13 @@ def _build_optional_note(report: ValidationReport) -> str:
     return f"必须字段已满足，仍有 {len(report.missing_optional)} 个非关键字段缺失；导出时会留空。"
 
 
-def _build_conflict_question(agent: MetadataAgent) -> str:
-    report = validate_state(agent.state)
+def _build_conflict_question(agent: QrestAgent) -> str:
+    report = validate_state(agent.working_state)
     if not report.conflicts:
         return "当前没有冲突字段。"
     lines = ["发现字段冲突，请使用 /confirm Field.Path value 指定采用值："]
     for path in report.conflicts:
-        record = agent.state.records.get(path)
+        record = agent.working_state.records.get(path)
         lines.append(f"- {path}")
         if record is not None:
             lines.append(f"  当前值：{json.dumps(record.value, ensure_ascii=False)}")
@@ -502,11 +498,11 @@ def _build_conflict_question(agent: MetadataAgent) -> str:
     return "\n".join(lines)
 
 
-def _build_state_summary(agent: MetadataAgent) -> str:
-    report = validate_state(agent.state)
+def _build_state_summary(agent: QrestAgent) -> str:
+    report = validate_state(agent.working_state)
     known = [
         (path, record)
-        for path, record in sorted(agent.state.records.items())
+        for path, record in sorted(agent.working_state.records.items())
         if record.value is not None and record.status not in {"missing", "empty"}
     ]
     missing_count = len(report.missing_required) + len(report.missing_important) + len(report.missing_optional)

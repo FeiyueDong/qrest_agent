@@ -5,14 +5,15 @@ from copy import deepcopy
 from pathlib import Path
 
 from qrest_agent.core.models import Candidate, Evidence
-from qrest_agent.core.state import MetadataState
+from qrest_agent.core.schema import QREST_REQUIRED_PATHS
 from qrest_agent.core.validator import validate_state
+from qrest_agent.state import WorkingState
 from qrest_agent.resources import qrest_examples_root
 from tests.conftest import write_json
 
 
 def test_conflicting_candidates_are_not_silently_overwritten(artifact_dir: Path) -> None:
-    state = MetadataState.empty()
+    state = WorkingState.empty()
     state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="A", confidence=0.9))
     state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="B", confidence=0.9))
 
@@ -26,7 +27,7 @@ def test_conflicting_candidates_are_not_silently_overwritten(artifact_dir: Path)
 
 
 def test_confirmed_value_overrides_extracted_conflict_candidate(artifact_dir: Path) -> None:
-    state = MetadataState.empty()
+    state = WorkingState.empty()
     state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="A", confidence=0.9))
     state.submit(Candidate(field_path="BuildingInfo.ProjectName", value="B", status="confirmed", confidence=1.0))
 
@@ -44,7 +45,7 @@ def test_import_export_preserves_extension_fields(artifact_dir: Path) -> None:
     metadata["InstrumentInfo"]["Channels"][0]["DeviceType"] = "S05"
     metadata["CustomRoot"] = {"note": "preserve me"}
 
-    state = MetadataState.from_metadata(metadata)
+    state = WorkingState.from_metadata(metadata, paths=QREST_REQUIRED_PATHS)
     exported = state.to_metadata()
     write_json(artifact_dir / "state" / "extension_preserved_metadata.json", exported)
 
@@ -56,7 +57,7 @@ def test_import_export_preserves_extension_fields(artifact_dir: Path) -> None:
 def test_candidate_update_preserves_unrelated_extensions(artifact_dir: Path) -> None:
     metadata = json.loads((qrest_examples_root() / "kunming2" / "metadata.json").read_text(encoding="utf-8"))
     metadata["CustomRoot"] = {"note": "preserve me"}
-    state = MetadataState.from_metadata(metadata)
+    state = WorkingState.from_metadata(metadata, paths=QREST_REQUIRED_PATHS)
 
     state.submit(
         Candidate(

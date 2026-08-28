@@ -1,34 +1,16 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
-from qrest_agent.agent.metadata_agent import MetadataAgent
-from qrest_agent.agent.task_handlers import TaskHandlerRegistry, create_default_handler_registry
-from qrest_agent.agent.task_models import TaskExecutionResult, TaskIntent
-from qrest_agent.skills import SkillRegistry
-
-
-class TaskCoordinator:
-    def __init__(
-        self,
-        agent: MetadataAgent,
-        session_id: str,
-        skill_registry: SkillRegistry | None = None,
-        handler_registry: TaskHandlerRegistry | None = None,
-    ) -> None:
-        self.handlers = handler_registry or create_default_handler_registry(agent, session_id, skill_registry=skill_registry)
-
-    def handle(self, text: str) -> TaskExecutionResult | None:
-        intent = detect_task_intent(text)
-        if intent is None:
-            return None
-        handler = self.handlers.get(intent.name)
-        if handler is None:
-            return None
-        return handler.handle(text, intent)
+from qrest_agent.agent.task_models import TaskIntent
 
 
 def detect_task_intent(text: str) -> TaskIntent | None:
+    """检测自然语言中的 qREST 数据加载/生成任务意图（主 Agent 规划器的规则兜底）。
+
+    仅负责“识别”，不包含任何执行逻辑；执行由 QrestAgent 按计划调用 skill handler。
+    """
     loading = parse_qrest_data_loading_intent(text)
     if loading is not None:
         return loading
@@ -90,3 +72,43 @@ def extract_paths(text: str) -> list[str]:
         if path and path not in cleaned:
             cleaned.append(path)
     return cleaned
+
+
+def intent_to_arguments(intent: TaskIntent) -> dict[str, Any]:
+    """TaskIntent → AgentPlan.tool_arguments（供主 Agent 计划传递）。"""
+    return {
+        "mode": intent.mode,
+        "metadata_json": intent.metadata_json,
+        "data_txt": intent.data_txt,
+        "output_qrest": intent.output_qrest,
+        "input_qrest": intent.input_qrest,
+        "compare_metadata_json": intent.compare_metadata_json,
+        "strict": intent.strict,
+    }
+
+
+def intent_from_arguments(skill_name: str, arguments: dict[str, Any]) -> TaskIntent | None:
+    """AgentPlan.tool_arguments → TaskIntent；skill 或参数非法时返回 None。"""
+    if skill_name not in {"qrest_data_generation", "qrest_data_loading"}:
+        return None
+    mode = str(arguments.get("mode") or "")
+    if skill_name == "qrest_data_generation":
+        if mode not in {"preflight", "generate"}:
+            mode = "preflight"
+    elif mode not in {"load", "import"}:
+        mode = "load"
+    return TaskIntent(
+        name=skill_name,
+        skill_name=skill_name,
+        mode=mode,
+        metadata_json=_optional_string(arguments.get("metadata_json")),
+        data_txt=_optional_string(arguments.get("data_txt")),
+        output_qrest=_optional_string(arguments.get("output_qrest")),
+        input_qrest=_optional_string(arguments.get("input_qrest")),
+        compare_metadata_json=_optional_string(arguments.get("compare_metadata_json")),
+        strict=bool(arguments.get("strict", False)),
+    )
+
+
+def _optional_string(value: Any) -> str | None:
+    return str(value) if value is not None else None

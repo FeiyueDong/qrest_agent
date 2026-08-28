@@ -13,7 +13,7 @@ from qrest_agent.core.metadata_policy import (
 )
 from qrest_agent.core.models import ValidationReport
 from qrest_agent.core.path import get_path, set_path
-from qrest_agent.core.state import MetadataState
+from qrest_agent.core.schema import DEFAULT_METADATA
 from qrest_agent.core.validator import validate_state
 
 
@@ -44,7 +44,7 @@ class MetadataExportResult:
         return payload
 
 
-def prepare_metadata_export(state: MetadataState, include_reserved_analysis: bool = True) -> MetadataExportResult:
+def prepare_metadata_export(state: Any, include_reserved_analysis: bool = True) -> MetadataExportResult:
     report = validate_state(state)
     blocked = list(report.missing_required) + list(report.conflicts) + list(report.evidence_gaps)
     blocked.extend(issue.field_path for issue in report.issues if issue.level == "error" and issue.field_path not in blocked)
@@ -58,7 +58,11 @@ def prepare_metadata_export(state: MetadataState, include_reserved_analysis: boo
             messages=["存在必须字段缺失、冲突或错误字段，未生成 metadata.json。"],
         )
 
-    metadata = state.to_metadata(include_reserved_analysis=include_reserved_analysis)
+    metadata = state.to_metadata()
+    if include_reserved_analysis and "analysis" not in metadata:
+        metadata["analysis"] = deepcopy(DEFAULT_METADATA["analysis"])
+    if not include_reserved_analysis:
+        metadata.pop("analysis", None)
     defaulted: list[str] = []
     blanked: list[str] = []
 

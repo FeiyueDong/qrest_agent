@@ -8,8 +8,8 @@ from qrest_agent.core.metadata_policy import channel_key_importance, field_polic
 from qrest_agent.core.models import Candidate, Evidence
 from qrest_agent.core.path import get_path
 from qrest_agent.core.schema import QREST_EXTENSION_POLICY, QREST_FIELD_SPECS, QREST_REQUIRED_PATHS
-from qrest_agent.core.state import MetadataState
 from qrest_agent.core.validator import validate_metadata
+from qrest_agent.state import WorkingState
 from qrest_agent.resources import qrest_examples_root, qrest_schema_path
 from tests.conftest import write_json
 
@@ -89,7 +89,7 @@ def test_metadata_policy_is_loaded_from_annotated_example(artifact_dir: Path) ->
 
 
 def test_export_allows_defaults_for_important_and_blanks_for_optional_fields(artifact_dir: Path) -> None:
-    state = MetadataState.empty()
+    state = WorkingState.empty()
     evidence = [Evidence(source_id="test", text="manual candidate")]
     for candidate in [
         Candidate(field_path="BuildingInfo.ElevationNum", value=1, status="confirmed", evidence=evidence),
@@ -127,7 +127,7 @@ def test_export_allows_defaults_for_important_and_blanks_for_optional_fields(art
 
 
 def test_export_blocks_when_mandatory_fields_are_missing(artifact_dir: Path) -> None:
-    state = MetadataState.empty()
+    state = WorkingState.empty()
 
     export = prepare_metadata_export(state)
     write_json(artifact_dir / "validation" / "weighted_export_blocked.json", export.to_dict())

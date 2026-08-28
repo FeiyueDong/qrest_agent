@@ -49,10 +49,13 @@
     明确区分“缺失”与“默认值”，三档导出策略标注更清晰；
   - 方案 §14 的 7 项验收测试已落地为 `tests/test_acceptance.py`。
 
-## 过渡说明
+## 收尾状态（facade 移除完成）
 
-- `core.models.MetadataState` / `agent.metadata_agent.MetadataAgent` 目前是
-  Phase 1-2 的过渡门面，委托给 `WorkingState` / `QrestAgent`；
-  随着 Phase 3 拆分将逐步删除。
+- `MetadataState` / `MetadataAgent` / `TaskCoordinator` 已删除；
+  全系统只存在 `QrestAgent` + `WorkingState` 一套主体：
+  - 自然语言任务由 `QrestAgent.plan()` 决策（LLM 规划，规则兜底识别
+    加载/生成意图 → 调 skill handler）；
+  - CLI / API / Web / 对话层全部直接使用 QrestAgent；
+  - validator / exporter 统一接收 WorkingState。
 - 导出策略维持三档（必须阻断 / 重要填默认值并标注 defaulted_fields / 不重要留空），
-  但缺失与默认值在报告中的标注将随 Phase 7 进一步明确。
+  并带 `field_annotations`（blocked / defaulted / blank / evidenced）明确标注。
