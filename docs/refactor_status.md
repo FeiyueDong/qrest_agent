@@ -16,9 +16,21 @@
   - 状态语义：confirmed / extracted / derived 可进入最终数据（需证据）；
     uncertain / inferred 默认禁止；missing 必须询问；
   - 所有提取结果先进入 Working State；最终 Metadata 只由 `to_metadata()` 生成。
-- [ ] **Phase 3：拆分现有代码**（extractor 专业正则 → Skill/Tool；删除固定流程）
-- [ ] **Phase 4：Skill 系统**（metadata/building_info/instrument_info/data_info/sensor_layout）
-- [ ] **Phase 5：Tool 系统**（document reader / table reader / calculator / validator / writer）
+- [x] **Phase 3：拆分现有代码**
+  - 确定性推导逻辑从 `agent/extractor.py` 拆出到 `tools/metadata_calculator.py`
+    （Elevation 序列、通道布置、包围盒、Frequency、Azimuth 归一化、计数推导），
+    提取器只保留文本参数提取与规则兜底；
+  - 删除提取器内的重复推导实现与无用导入；
+  - 固定询问顺序/任务路由的进一步简化推迟到 Phase 6（由 Agent Loop 接管）。
+- [x] **Phase 4：Skill 系统（核心部分）**
+  - 新增专业知识 Skill：`metadata` / `building_info` / `instrument_info` / `data_info`
+    （字段含义、允许的确定性推导、必须询问项、冲突处理、禁止行为）；
+  - 待建：`sensor_layout`（测点布置判断）与更多专项 Skill。
+- [x] **Phase 5：Tool 系统（核心部分）**
+  - 注册确定性工具：`read_document` / `calculate_frequency` / `calculate_bounding_box` /
+    `normalize_azimuth` / `derive_elevation_profile` / `derive_channel_layout` /
+    `derive_counts` / `validate_metadata`；
+  - 待建：`table_reader`（通道表读取）、单位归一化工具与 metadata writer。
 - [ ] **Phase 6：Agent Loop**（读 Skill / 调 Tool / 提问的自主循环）
 - [ ] **Phase 7：验证机制**（evidence validation / conflict validation 全面接入导出策略）
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
 from typing import Any
 
 from qrest_agent.agent.prompts import EXTRACTION_SYSTEM_PROMPT, build_extraction_user_prompt
@@ -10,6 +9,12 @@ from qrest_agent.core.models import Candidate, Evidence
 from qrest_agent.core.schema import QREST_FIELD_SPECS_BY_PATH, QREST_REQUIRED_PATHS
 from qrest_agent.ingestion.sources import SourceChunk
 from qrest_agent.llm.clients import BaseLLMClient
+from qrest_agent.tools.metadata_calculator import (
+    ElevationProfile,
+    build_channel_layout,
+    calculate_bounding_box,
+    derive_elevation_profile,
+)
 
 
 class LLMExtractor:
@@ -43,25 +48,8 @@ class RuleBasedExtractor:
         return candidates
 
 
-@dataclass(frozen=True, slots=True)
-class ElevationProfile:
-    above_ground_floors: int
-    basement_floors: int
-    first_floor_height: float
-    typical_above_height: float
-    basement_first_height: float | None
-    basement_second_height: float | None
-    elevations: list[float]
-
-    def monitored_floor_height(self, floor: str | int) -> float | None:
-        if floor == "B1F":
-            return self.elevations[0] if self.elevations and self.elevations[0] < 0 else None
-        if floor == 1:
-            return 0.0
-        if isinstance(floor, int) and floor > 1:
-            return _round_m(self.first_floor_height + (floor - 1) * self.typical_above_height)
-        return None
-
+# ElevationProfile 与楼层/通道推导逻辑已拆分到
+# qrest_agent.tools.metadata_calculator（确定性计算 Tool），本模块只负责文本参数提取。
 
 def _extract_from_json(chunk: SourceChunk) -> list[Candidate]:
     text = chunk.text.strip()
@@ -255,7 +243,7 @@ def _extract_kunming_document_patterns(text: str, chunk: SourceChunk) -> list[Ca
         candidates.append(
             _candidate(
                 "BuildingInfo.StructuralFootprint.BoundingBox",
-                {"MaxX": length / 2, "MinX": -length / 2, "MaxY": width / 2, "MinY": -width / 2},
+                calculate_bounding_box(length, width),
                 chunk,
                 status="derived",
                 confidence=0.7,
@@ -316,27 +304,13 @@ def _parse_elevation_profile(text: str) -> ElevationProfile | None:
     basement_first = _optional_float_match(r"地下第一层层高\s*(?:为|是|:|：)?\s*([0-9]+(?:\.[0-9]+)?)\s*m", text)
     basement_second = _optional_float_match(r"地下第二层层高\s*(?:为|是|:|：)?\s*([0-9]+(?:\.[0-9]+)?)\s*m", text)
 
-    elevations: list[float] = []
-    if basement > 0:
-        # The qREST examples keep one representative underground monitoring elevation
-        # before ground level. If no explicit B1 absolute elevation exists, use the
-        # height of the floor below B1 as the best supported boundary.
-        if basement >= 2 and basement_second is not None:
-            elevations.append(_round_m(-basement_second))
-        elif basement_first is not None:
-            elevations.append(_round_m(-basement_first))
-    elevations.append(0.0)
-    for index in range(above_ground):
-        elevations.append(_round_m(first_height + index * typical_height))
-
-    return ElevationProfile(
+    return derive_elevation_profile(
         above_ground_floors=above_ground,
         basement_floors=basement,
         first_floor_height=first_height,
         typical_above_height=typical_height,
         basement_first_height=basement_first,
         basement_second_height=basement_second,
-        elevations=elevations,
     )
 
 
@@ -356,35 +330,15 @@ def _derive_channels_from_layout(text: str, profile: ElevationProfile | None) ->
         return []
 
     length, width = footprint
-    x_edge = _round_m(max(length / 2 - 0.4, length / 2 * 0.95), digits=1)
-    y_line = _round_m(-width / 6, digits=1)
     device_type = _parse_device_type(text)
-    channel_templates = [
-        (-x_edge, y_line, 90.0),
-        (x_edge, y_line, 90.0),
-        (0.0, y_line, 0.0),
-    ]
-
-    channels: list[dict[str, Any]] = []
-    channel_no = 1
-    for floor in monitored_floors:
-        z = profile.monitored_floor_height(floor)
-        if z is None:
-            return []
-        for x, y, azimuth in channel_templates:
-            channel: dict[str, Any] = {
-                "ChannelNo": channel_no,
-                "ChannelID": "UNKNOWN",
-                "Measurand": "Acceleration",
-                "Scale": 1.0,
-                "Azimuth": azimuth,
-                "LocationXYZ": [_round_m(x, digits=1), _round_m(y, digits=1), _round_m(z, digits=1)],
-            }
-            if device_type is not None:
-                channel["DeviceType"] = device_type
-            channels.append(channel)
-            channel_no += 1
-    return channels
+    return build_channel_layout(
+        monitored_floors=monitored_floors,
+        profile=profile,
+        footprint_length=length,
+        footprint_width=width,
+        device_type=device_type,
+        per_floor_count=per_floor_count,
+    )
 
 
 def _parse_monitored_floors(text: str) -> list[str | int]:
@@ -436,11 +390,6 @@ def _parse_device_type(text: str) -> str | None:
 def _optional_float_match(pattern: str, text: str) -> float | None:
     match = re.search(pattern, text)
     return float(match.group(1)) if match else None
-
-
-def _round_m(value: float, digits: int = 3) -> float:
-    rounded = round(float(value), digits)
-    return 0.0 if rounded == -0.0 else rounded
 
 
 def _combined_chunk(chunks: list[SourceChunk], text: str) -> SourceChunk:
