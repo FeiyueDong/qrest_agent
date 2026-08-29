@@ -24,7 +24,7 @@ SCENES = sys.argv[2:] or ["all"]
 
 
 def run_scenario(name: str, text: str, files: list[str] | None = None, prior: str | None = None) -> dict[str, Any]:
-    client = OllamaClient(model=MODEL, retries=0)
+    client = OllamaClient(model=MODEL, retries=2)
     agent = QrestAgent(llm_client=client)
     if prior:
         agent.run_turn(text=prior)

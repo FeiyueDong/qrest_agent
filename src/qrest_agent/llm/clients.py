@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import time
@@ -24,22 +25,59 @@ class BaseLLMClient(Protocol):
 
 
 class OllamaClient:
-    def __init__(self, model: str, base_url: str = "http://localhost:11434", retries: int = 1) -> None:
+    def __init__(
+        self,
+        model: str,
+        base_url: str = "http://localhost:11434",
+        retries: int = 1,
+        num_thread: int | None = None,
+        timeout: int = 600,
+        think: bool = False,
+        num_ctx: int = 8192,
+        num_predict: int = 600,
+    ) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.retries = retries
+        # 本地 CPU 推理必须显式使用全部核心，否则大模型默认线程过少会卡死
+        self.num_thread = num_thread if num_thread is not None else (os.cpu_count() or 8)
+        self.timeout = timeout
+        # qwen3.5 等 thinking 模型默认开启思维链，CPU 上长思考会卡死；agent 测试关闭
+        self.think = think
+        # agent prompt（system+schema+skill+source）远超 ollama 默认 4096 窗口；
+        # 限制生成长度，避免长自然语言回复在 CPU 推理下超时
+        self.num_ctx = num_ctx
+        self.num_predict = num_predict
 
     def complete_json(self, messages: list[dict[str, str]], schema_hint: dict[str, Any] | None = None) -> dict[str, Any]:
+        """带 JSON 解析级重试：本地 ollama 连续请求偶发返回空/坏 JSON，重试可恢复。"""
         payload = {
             "model": self.model,
             "messages": messages,
             "stream": False,
             "format": "json",
-            "options": {"temperature": 0},
+            "options": {
+                "temperature": 0,
+                "num_thread": self.num_thread,
+                "think": self.think,
+                "num_ctx": self.num_ctx,
+                "num_predict": self.num_predict,
+            },
         }
-        data = _post_json(f"{self.base_url}/api/chat", payload, retries=self.retries)
-        content = data.get("message", {}).get("content", "{}")
-        return _parse_json_object(content)
+        last_error: Exception | None = None
+        for attempt in range(self.retries + 1):
+            try:
+                data = _post_json(f"{self.base_url}/api/chat", payload, retries=0, timeout=self.timeout)
+                content = data.get("message", {}).get("content", "{}")
+                return _parse_json_object(content)
+            except ValueError as exc:
+                last_error = exc
+                if attempt < self.retries:
+                    time.sleep(min(1.0 + attempt, 3.0))
+                    continue
+                raise
+        assert last_error is not None
+        raise last_error
 
 
 class OllamaCliClient:

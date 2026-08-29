@@ -54,7 +54,7 @@ def run_once(name: str, client: OllamaClient) -> dict[str, Any]:
 
 
 def main() -> None:
-    client = OllamaClient(model=MODEL, retries=0)
+    client = OllamaClient(model=MODEL, retries=2)
     all_runs: list[dict[str, Any]] = []
     for run in range(1, RUNS + 1):
         for scene in SCENES:
