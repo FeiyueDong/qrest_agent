@@ -5,12 +5,15 @@
 
 默认模型 qwen3:4b-instruct；场景名：ascii/footprint/elevation/channels/correction/
 hallucination/qrest_ask，或 all。
+
+结果自动写入 test_outputs/llm_e2e/<model>.json，并打印一行汇总。
 """
 from __future__ import annotations
 
 import json
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 from qrest_agent.agent.agent import QrestAgent
@@ -49,6 +52,24 @@ def run_scenario(name: str, text: str, files: list[str] | None = None, prior: st
         "response": result.response[:400],
     }
     return payload
+
+
+def summarize(model: str, outputs: list[dict[str, Any]]) -> dict[str, Any]:
+    llm_turns = sum(1 for item in outputs if item.get("extractor") == "llm")
+    rule_turns = sum(1 for item in outputs if item.get("extractor") == "rule")
+    fallbacks = [item["scenario"] for item in outputs if item.get("fallback_reason")]
+    rejected = sum(len(item.get("rejected") or []) for item in outputs)
+    fact_scenes = [item["scenario"] for item in outputs if item.get("facts")]
+    return {
+        "model": model,
+        "scenarios": len(outputs),
+        "llm_extractor": llm_turns,
+        "rule_fallback": rule_turns,
+        "fallback_scenarios": fallbacks,
+        "rejected_candidates": rejected,
+        "scenes_with_facts": fact_scenes,
+        "total_seconds": round(sum(item.get("seconds", 0) for item in outputs), 1),
+    }
 
 
 def main() -> None:
@@ -94,8 +115,12 @@ def main() -> None:
             "用当前项目状态生成 qREST",
         ))
 
-    for payload in outputs:
-        print(json.dumps(payload, ensure_ascii=False, indent=2), flush=True)
+    out_dir = Path("test_outputs") / "llm_e2e"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{MODEL.replace(':', '_')}.json"
+    out_path.write_text(json.dumps(outputs, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(summarize(MODEL, outputs), ensure_ascii=False, indent=2), flush=True)
+    print(f"# detail saved: {out_path}", flush=True)
 
 
 if __name__ == "__main__":

@@ -479,6 +479,18 @@ class WorkingState:
         if state.status == "confirmed" and status != "confirmed":
             return state
 
+        if status == "derived" and state.status not in EXPORTABLE_STATUSES:
+            # 确定性推导覆盖不可导出占位（inferred/uncertain 猜测不是事实，
+            # Tool 计算结果取代它；同值/不同值都直接替换）
+            state.value = deepcopy(value)
+            state.status = "derived"
+            state.confidence = confidence
+            state.evidence = list(evidence)
+            state.derived_from = list(derived_from or [])
+            state.updated_by = updated_by
+            state.revision += 1
+            return state
+
         if state.value == value:
             state.confidence = max(state.confidence, confidence)
             state.evidence.extend(evidence)

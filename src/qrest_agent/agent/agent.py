@@ -609,9 +609,13 @@ class QrestAgent:
         if not isinstance(param_length, int | float) or not isinstance(param_width, int | float):
             return
         # 参数变更后旧 derived 包围盒失效：Parameters revision 更新则重算；
-        # 用户确认/提取的 BoundingBox 不覆盖。
-        needs_bbox = bbox is None or bbox.value is None or (
-            bbox.status == "derived" and parameters.revision > bbox.revision
+        # 用户确认/提取的 BoundingBox 不覆盖；
+        # inferred/uncertain 占位不阻塞确定性推导（LLM 的猜测不能替代 Tool 计算）。
+        needs_bbox = (
+            bbox is None
+            or bbox.value is None
+            or bbox.status not in EXPORTABLE_STATUSES
+            or (bbox.status == "derived" and parameters.revision > bbox.revision)
         )
         if needs_bbox:
             output = self.tools.execute("calculate_bounding_box", {"length": float(param_length), "width": float(param_width)})
@@ -641,7 +645,7 @@ class QrestAgent:
         不按经验补充。
         """
         elevation = state.get("BuildingInfo.Elevation")
-        if elevation is not None and elevation.value is not None:
+        if elevation is not None and elevation.value is not None and elevation.status in EXPORTABLE_STATUSES:
             return
 
         above = _fact_value(state, "Building.above_ground_floors")

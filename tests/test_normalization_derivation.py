@@ -338,6 +338,25 @@ def test_derived_to_derived_recompute_overwrites_old_value() -> None:
     assert record.alternatives == []
 
 
+def test_inferred_placeholder_does_not_block_deterministic_derivation() -> None:
+    """LLM 的 inferred BoundingBox/Elevation 占位不能阻塞 Tool 的确定性推导。"""
+    agent = QrestAgent()
+    agent.working_state.set("BuildingInfo.StructuralFootprint.Shape", "Rectangular",
+                            evidence=[StateEvidence(source_id="doc", text="rect")])
+    agent.working_state.set("BuildingInfo.StructuralFootprint.Parameters", {"Length": 42.0, "Width": 25.2},
+                            evidence=[StateEvidence(source_id="doc", text="42x25.2")])
+    # 模拟 LLM 输出 inferred 占位（不可导出，但 value 非 None）
+    agent.working_state.set("BuildingInfo.StructuralFootprint.BoundingBox",
+                            {"MaxX": 21.0, "MinX": -21.0, "MaxY": 12.6, "MinY": -12.6},
+                            status="inferred", evidence=[StateEvidence(source_id="doc", text="llm guess")])
+    agent.run_turn("")
+
+    bbox = agent.working_state.get("BuildingInfo.StructuralFootprint.BoundingBox")
+    assert bbox is not None
+    assert bbox.status == "derived", "inferred 占位应被确定性推导覆盖"
+    assert bbox.evidence[0].tool == "calculate_bounding_box"
+
+
 def test_facts_never_enter_metadata_or_schema_gate(artifact_dir: Path) -> None:
     """Intermediate Facts 不参与 metadata 导出，也不受 schema gate 约束（但仍需证据）。"""
     agent = QrestAgent()
