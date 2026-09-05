@@ -1,210 +1,257 @@
 # qREST Agent
 
-qREST Agent is a first-pass framework for building a skill-first AI assistant for qREST projects.
+面向 qREST（建筑结构轻量化地震监测）工程元数据收集的 **Agent 驱动** AI 助手：
+用户用自然语言描述工程信息、上传资料（Word/PDF/Excel/JSON/…），Agent 负责理解与决策，
+Python 侧以确定性代码保证数据结构、证据与一致性。
 
-The current focus is an agentic first stage:
+核心原则：
 
-- route natural-language qREST tasks through repo-native skills and skill handlers;
-- collect building, instrumentation, and data metadata from user messages and uploaded materials;
-- store extracted values as candidates with evidence;
-- merge candidates into a project state without letting the model directly overwrite final metadata;
-- validate required qREST fields deterministically;
-- export standard qREST `metadata.json`;
-- load and generate `.qrest` artifacts through deterministic qREST tools;
-- keep an `analysis` extension point for later algorithm-parameter configuration.
+- **LLM 负责理解、选择和表达**；Skill 提供专业知识；Tool 做确定性计算；
+- **Working State 是唯一事实中心**：每条事实保存为
+  `value + status（missing/extracted/uncertain/derived/inferred/confirmed/conflict）+ evidence`，
+  uncertain/inferred 永不进入最终 Metadata；
+- **Schema Gate / Validator / Exporter 保证数据契约**：结构非法值（如 `Channels=18`）在进入
+  状态前即被拒绝；最终导出的 metadata.json 中所有字符串必须为规范 ASCII 值
+  （受控字段自动完成中文→英文映射，如 `钢框架→SteelFrame`）；
+- **Intermediate Facts + Derivation Pass**：Agent 可保存有证据的中间事实
+  （如 `Building.above_ground_floors`），由确定性 Tool 自动推导
+  `StructuralFootprint`、`Elevation`、`ElevationNum` 等复杂字段。
 
-The core package intentionally has no third-party runtime dependency yet, so it can run in the current `.venv` before local and online model providers are finalized.
+架构与各轮演进文档见 [docs/](docs/)（历史方案归档在 `docs/stage1-4/`）。
 
-## Quick Start
+---
+
+## 1. 环境准备
 
 ```bash
-env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli resources
-env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli validate resources/qrest_data/examples/kunming2/metadata.json
-env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli extract-text "项目名为 Demo，大楼高度 62.5m，采样间隔 0.02s。"
+# Python 虚拟环境（仓库内已提供 .venv）
+.venv/bin/python --version
+
+# 本地模型（可选，用于 LLM 模式）：需要 ollama 服务运行
+ollama list          # 查看已安装模型
+ollama serve         # 如服务未启动（系统服务已托管则无需）
 ```
 
-## Tests
+本机可用模型示例（以 `ollama list` 输出为准）：
+
+| 模型 | 说明 |
+| --- | --- |
+| qwen3:4b-instruct | 默认模型；CPU 环境稳定（推荐） |
+| qwen3.5:9b / qwen3:14b / qwen3.8:latest | 质量更高，建议 GPU 环境 |
+| deepseek-r1:8b / deepseek-r1:14b | 推理模型，注意思考链开销 |
+
+> 无模型 / 断网时也可运行：使用 `--provider rule` 的确定性规则模式（仅兜底）。
+
+---
+
+## 2. 最常用命令
 
 ```bash
+# 启动命令行对话（LLM 模式，默认 ollama + qwen3:4b-instruct）
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli chat
+
+# 规则模式（无需模型，适合快速冒烟）
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli chat --provider rule
+
+# 启动 Web UI（默认 127.0.0.1:8000）
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli web
+
+# 指定端口 / 局域网访问启动 Web UI
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli web --host 0.0.0.0 --port 8080
+# 然后从其他设备打开 http://<本机IP>:8080/
+
+# 运行测试
 .venv/bin/python -m pytest
 ```
 
-Tests write human-readable artifacts to `test_outputs/` for manual review. See [docs/testing.md](docs/testing.md).
+---
 
-## LLM Extraction Benchmark
+## 3. 切换模型 / Provider
 
-The extraction benchmark compares deterministic extraction with local or online model providers:
+需要 LLM 的命令（`chat`、`web`、`extract-text`、`benchmark-extraction`）共用同一套切换方式。
+Provider 可选：`rule` | `ollama`（HTTP API，推荐）| `ollama-cli`（子进程调用）| `openai-compatible`。
+
+### 3.1 命令行参数（优先级最高）
 
 ```bash
-env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli benchmark-extraction \
-  --provider rule \
-  --output test_outputs/llm/rule_benchmark.json
+# 切换到其它本地模型（HTTP API，速度最快）
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli chat \
+  --provider ollama --model qwen3.5:9b
 
-env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli benchmark-extraction \
-  --provider ollama-cli \
-  --model qwen3:4b-instruct \
-  --output test_outputs/llm/qwen3_4b-instruct_benchmark.json
+# 使用 ollama run 子进程方式（与终端 ollama run 行为一致）
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli chat \
+  --provider ollama-cli --model qwen3:4b-instruct
+
+# OpenAI 兼容服务（vLLM / LM Studio / 远程 API 等）
+env PYTHONPATH=src QREST_AGENT_API_KEY=sk-xxx .venv/bin/python -m qrest_agent.cli chat \
+  --provider openai-compatible --model your-model --base-url http://your-server:8000/v1
+
+# Web UI 同样支持模型切换
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli web --port 8080 \
+  --provider ollama --model qwen3:14b
 ```
 
-Current local-model notes are tracked in [docs/llm_models.md](docs/llm_models.md).
+### 3.2 环境变量（全局默认）
 
-## Command-Line Dialogue
+| 变量 | 作用 |
+| --- | --- |
+| `QREST_AGENT_PROVIDER` | 默认 provider（rule / ollama / ollama-cli / openai-compatible） |
+| `QREST_AGENT_MODEL` | 默认模型名 |
+| `QREST_AGENT_BASE_URL` | ollama HTTP / OpenAI 兼容服务的 base_url |
+| `QREST_AGENT_API_KEY` | OpenAI 兼容服务的 API Key |
 
-By default, `chat`, `extract-text`, and `benchmark-extraction` read `resources/llm/provider_config.json`. The current default is `ollama-cli` with `qwen3:4b-instruct`.
+```bash
+export QREST_AGENT_PROVIDER=ollama
+export QREST_AGENT_MODEL=qwen3:14b
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli chat
+```
 
-For local-model testing with Ollama:
+### 3.3 配置文件（最低优先级）
+
+`resources/llm/provider_config.json` 中的 `default_provider` / `default_model`
+决定命令的默认值；`providers` 段描述各 provider 参数（如 `ollama` 的 `base_url`）。修改后全局生效。
+
+---
+
+## 4. 命令行参数速查
+
+每个子命令都可执行 `python -m qrest_agent.cli <command> --help` 查看完整参数。
+
+| 子命令 | 作用 | 关键参数 |
+| --- | --- | --- |
+| `chat` | 命令行对话 | `--provider/--model/--base-url/--api-key`、`--session-id`、`--artifact-root`、`--message`（可多次，脚本化）、`--transcript` |
+| `web` | 浏览器 UI（标准库实现，无 FastAPI 依赖） | `--host`（默认 127.0.0.1，LAN 用 0.0.0.0）、`--port`（默认 8000）、模型参数同上、`--artifact-root` |
+| `extract-text "文本"` | 单条文本跑完整 Agent 回合（JSON 输出） | 模型参数同上 |
+| `extract-file <path>` | 对文件跑完整 Agent 回合 | — |
+| `ingest-file <path>` | 只显示文件解析出的 source chunks | — |
+| `export-from-file <path> <meta_out> <audit_out>` | 提取并在就绪时导出 metadata + audit | — |
+| `validate <metadata.json>` | 确定性校验 metadata 文件 | — |
+| `benchmark-extraction` | 提取基准 | `--provider/--model`、`--output` |
+| `generate-qrest <meta.json> <data.txt> <out.qrest>` | 生成 .qrest | `--strict` |
+| `preflight-generate-qrest <meta.json> <data.txt>` | 生成前检查 | — |
+| `load-qrest <in.qrest> <meta_out.json> <data_out.txt>` | 解析 .qrest | `--compare-metadata-json` |
+| `resources` | 列出捆绑资源/示例/工具 | `--json` |
+
+---
+
+## 5. 对话用法
 
 ```bash
 env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli chat
 ```
 
-For a deterministic rule-based smoke test:
+自然语言任务示例：
+
+- `结构为钢框架，矩形平面，尺寸约42m × 25.2m。`（提取 + 自动推导 Parameters/BoundingBox）
+- `地上14层，地下2层，首层4.5m，标准层3.3m。`（中间事实 → 自动推导 Elevation）
+- `解析 resources/qrest_data/examples/kunming2/kunming2.qrest 并导入当前项目`
+- `检查 resources/qrest_data/examples/kunming2/metadata.json 和 data.txt 能不能生成 qREST`
+- `用当前项目状态和 data.txt 直接生成 qREST`
+- `前面的长度不对，改为46.9m。`（修正历史值）
+
+调试 / 底层命令（保留为 debug 入口，正式流程建议用自然语言）：
+
+- `/help`、`/provider`（当前模型/模式）、`/state`（字段与校验状态）
+- `/missing`、`/conflicts`、`/confirm Field.Path value`（如 `/confirm DataInfo.DT 0.02`）
+- `/file path`、`/tools`（skills 与 tools 列表）
+- `/load-qrest …`、`/generate-qrest …`、`/quit`
+
+脚本化运行（自动消息 + 导出 transcript）：
 
 ```bash
 env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli chat \
   --provider rule \
-  --transcript test_outputs/dialogue/manual_chat_transcript.json
+  --message "项目名称为 Demo，采样间隔为 0.02s。" \
+  --message "/confirm DataInfo.NPTS 30000" \
+  --message "/state" \
+  --transcript test_outputs/dialogue/cli_chat_transcript.json
 ```
 
-Prefer natural-language tasks inside the chat:
+---
 
-- `解析 resources/qrest_data/examples/kunming2/kunming2.qrest 并导入当前项目`
-- `检查 metadata.json 和 data.txt 能不能生成 qREST`
-- `用当前项目状态和 data.txt 直接生成 qREST`
+## 6. Web UI
 
-Useful inspection and low-level commands:
+浏览器界面（左侧 Agent Activity 栏 + 中间对话 + 右侧 Project State）：
+对话与附件、已确认/待确认/缺失/冲突计数、字段详情与 Evidence、This Turn /
+Recent Turns / Inputs / Skills / Artifacts。
 
-- `/state`
-- `/provider`
-- `/debug`
-- `/missing`
-- `/conflicts`
-- `/file path/to/source.pdf`
-- `/tools`
-- `/load-qrest input.qrest [source_metadata.json]`
-- `/generate-qrest metadata.json data.txt [output.qrest]`
-- `/confirm Field.Path value`
-- `/quit`
+交互模型是 **Turn = 消息 + 附件**：
 
-`/tools` lists repo-native skills, registered skill handlers, deterministic tools, and low-level shortcut commands.
-
-For user instructions that should modify state, the dialogue layer asks the configured model to parse a structured action, then Python validates and executes it. Examples:
-
-- `冲突部分全部更新为候选值`
-- `所有冲突保留当前值`
-- `采样点数按 30000 处理`
-
-The chat startup line prints the active provider/model/extractor. If an LLM call fails or returns no valid candidates, the dialogue response reports that it fell back to rule extraction.
-
-The extractor is hybrid during LLM runs: the local/online model extracts flexible natural-language facts, and deterministic rules still run afterward to derive qREST-specific structures such as `BuildingInfo.Elevation` and `InstrumentInfo.Channels`.
-
-## Browser UI
-
-The lightweight browser UI uses Python's standard library and does not require FastAPI:
+1. 点「添加附件」选择文件 → 只上传登记为待发送（不立即触发 Agent）；
+2. 输入任务（如 `请根据这些资料整理当前项目的信息`）并发送 → 附件随消息一起处理；
+3. 右侧查看字段状态与自动推导结果；点击 Artifacts 文件可预览内容；
+   「导出 metadata.json」显示就绪状态与阻断原因。
 
 ```bash
-env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli web \
-  --host 127.0.0.1 \
-  --port 8000
+# 默认：127.0.0.1:8000
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli web
+
+# 指定端口 + 指定模型
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli web --port 8080 \
+  --provider ollama --model qwen3.5:9b
+
+# 局域网访问（从其它设备打开 http://<本机IP>:8000/）
+env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli web --host 0.0.0.0 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/` on the Linux machine.
+底层 REST 端点：`/api/sessions`、`/api/upload`（只保存附件）、`/api/turn`（消息+附件）、
+`/api/session`、`/api/artifacts`、`/api/export-metadata`。
+可选 FastAPI 封装：`qrest_agent.api.app.create_app()`（需安装 `qrest-agent[api]`）。
 
-For LAN testing, bind to all interfaces and visit the Linux machine's LAN IP from another device:
+---
+
+## 7. 真实 LLM 验证脚本
+
+`scripts/manual_e2e/` 提供真实模型场景与稳定性工具（结果写入 `test_outputs/llm_e2e/`）：
 
 ```bash
-env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli web \
-  --host 0.0.0.0 \
-  --port 8000
+# 全部场景（中文规范化/复杂字段推导/修正/幻觉/qREST 任务…）
+env PYTHONPATH=src .venv/bin/python scripts/manual_e2e/real_llm_scenarios.py qwen3:4b-instruct all
+
+# 指定场景
+env PYTHONPATH=src .venv/bin/python scripts/manual_e2e/real_llm_scenarios.py qwen3:4b-instruct elevation correction
+
+# 稳定性：同模型同场景重复 N 次
+env PYTHONPATH=src .venv/bin/python scripts/manual_e2e/stability_test.py qwen3:4b-instruct 3
+
+# 跨模型对比表
+env PYTHONPATH=src .venv/bin/python scripts/manual_e2e/compare_models.py
 ```
 
-Then open `http://<linux-ip>:8000/` from a device on the same network. The local firewall must allow inbound traffic on that port.
+实测结论：CPU 环境 qwen3:4b-instruct 在核心场景 3 次重复结果一致；更大模型（9B+）
+需要 GPU（见 `docs/qwen35_agent_test_report.md`、`docs/llm_model_stability_report.md`）。
 
-The page supports chat turns, document upload, current validation status, extracted field inspection, and artifact preview. It uses the same provider/model defaults as the CLI unless `--provider`, `--model`, or `--base-url` is overridden.
+---
 
-The page can also export `metadata.json` into the current session artifacts. Export follows the weighted metadata policy marked in `resources/qrest_data/examples/metadata.json`:
-
-- `必须`: blocks export when missing;
-- `重要`: exports with a warning and fills the annotated default value;
-- `不重要`: exports with an info note and leaves the value blank.
-
-## Bundled qREST Resources
-
-The project carries a local qREST reference bundle under `resources/qrest_data/`:
-
-- `docs/`: qREST storage and transfer protocol documents;
-- `examples/kunming2/` and `examples/wuhan/`: sample `metadata.json`, `data.txt`, and `.qrest` files;
-- `tools/linux/bin/`: bundled `data_generator` and `data_loader` binaries copied from qREST_Data.
-
-This keeps tests and agent workflows independent from `/home/yue/CodeFiles/qrest_data`.
-
-Input documents for ingestion tests live under `resources/input_doc/`. PDF parsing currently uses the system `pdftotext` command; DOCX/XLSX/CSV parsing uses the Python standard library.
-
-## qREST Skills And Tools
-
-The preferred dialogue path is skill-first. Natural-language requests are routed by `TaskCoordinator` to registered skill handlers:
-
-- `qrest_data_loading`: parse an existing `.qrest` file, write readable artifacts, and import loaded metadata into the session.
-- `qrest_data_generation`: preflight or generate a `.qrest` file from metadata and time-series data.
-
-The skill handlers call deterministic tools through `ToolRegistry`. The command-line tools remain available as low-level shortcuts:
+## 8. 测试
 
 ```bash
-env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli generate-qrest \
-  resources/qrest_data/examples/kunming2/metadata.json \
-  resources/qrest_data/examples/kunming2/data.txt \
-  /tmp/kunming2.qrest
-
-env PYTHONPATH=src .venv/bin/python -m qrest_agent.cli load-qrest \
-  resources/qrest_data/examples/kunming2/kunming2.qrest \
-  /tmp/metadata.json \
-  /tmp/data.txt
+.venv/bin/python -m pytest
 ```
 
-Inside Python, use `QrestDataTools.generate_qrest()` and `QrestDataTools.load_qrest()` as deterministic tools.
+测试把代表性输出写入 `test_outputs/` 供人工审阅。
 
-`generate-qrest` runs a deterministic preflight before calling the bundled binary. It validates metadata and reports data mismatches such as `DataInfo.NPTS` not matching the number of rows in `data.txt`. Warnings are shown in the `ToolResult`; use `--strict` to make warnings block generation.
+---
 
-The dialogue shell still accepts low-level commands:
+## 9. 目录速览
 
-```bash
-/load-qrest resources/qrest_data/examples/kunming2/kunming2.qrest
-/generate-qrest resources/qrest_data/examples/kunming2/metadata.json resources/qrest_data/examples/kunming2/data.txt
+```text
+src/qrest_agent/
+  agent/         QrestAgent 回合循环 / Planner / Extractor / Responder / 对话壳
+  core/          Schema Contract、Canonicalization、Validator、Exporter（确定性层）
+  state/         Working State（metadata 字段 + Intermediate Facts）
+  skills/        Skill 注册与加载
+  ingestion/     文档解析（pdf/docx/xlsx/csv/json…）
+  tools/         确定性计算与 qREST 数据工具
+  llm/           provider 客户端（ollama / ollama-cli / openai-compatible）与基准
+  api/ web/      ApiService、可选 FastAPI、标准库 Web UI
+resources/
+  skills/        领域知识 SKILL.md（metadata / building_info / instrument_info / …）
+  qrest_data/    捆绑的 qREST 文档 / 示例 / schema / 工具
+  llm/           provider_config.json、benchmark_cases.json
+docs/            设计文档与各轮进度（历史归档在 stage1-4/）
+scripts/manual_e2e/  真实模型 E2E 与稳定性脚本
 ```
 
-These commands are kept for precise debugging and scripted smoke runs. User-facing workflows should prefer natural-language tasks handled by skills.
-
-When a dialogue session supplies a `session_id`, tool outputs are managed under that session's artifact directory.
-
-## API Surface
-
-The first API layer is service-first and dependency-light:
-
-- `qrest_agent.api.ApiService` manages sessions, chat turns, text uploads, tool calls, and artifacts.
-- `qrest_agent.api.app.create_app()` provides an optional FastAPI wrapper. Install `qrest-agent[api]` before serving it.
-
-The API service and CLI both call the same deterministic validator, state merger, skill handlers, and `ToolRegistry`.
-
-## Design Boundary
-
-The LLM layer only produces `Candidate` records. The deterministic core owns:
-
-- schema paths;
-- candidate merge rules;
-- missing-field checks;
-- conflict detection;
-- qREST metadata export.
-
-This is deliberate: when key information is missing, the agent should report the missing fields and ask the user for more evidence instead of inventing engineering values.
-
-## Architecture Refactor Status (Phase 1-7 complete)
-
-Per [docs/qrest-agent 架构重构方案.md](docs/qrest-agent%20架构重构方案.md), the project has been rebuilt from a fixed-pipeline design into an agent-led architecture:
-
-- `qrest_agent.state.WorkingState`: canonical working state. Every fact is stored as `value + status + evidence (+ derived_from)` with statuses `missing / extracted / uncertain / derived / inferred / confirmed / conflict`. `inferred` and `uncertain` never enter final metadata, and export requires evidence.
-- `qrest_agent.agent.agent.QrestAgent`: the single main agent. It owns the Working State, Skills and Tools, plans each turn (LLM planning with rule fallback), executes tools (`read_document`, calculators, `table_reader`, `metadata_writer`, qREST conversion), runs deterministic derivations, consults knowledge skills when deciding, and never bypasses the Validator.
-- Knowledge skills under `resources/skills/`: `metadata`, `building_info`, `instrument_info`, `data_info`, `sensor_layout`, plus the `qrest_data_generation` / `qrest_data_loading` workflow skills.
-- Validation: schema, required-field, consistency, conflict and evidence checks; export policy annotates every managed field as `blocked / defaulted / blank / evidenced`.
-- The 7 acceptance criteria from plan section 14 are covered by `tests/test_acceptance.py`.
-
-Phase tracking lives in [docs/refactor_status.md](docs/refactor_status.md).
+更多：`docs/real_llm_verification.md`（真实模型验证记录）、`docs/normalization_derivation_status.md`
+（最近一轮改造进度）、`docs/llm_model_stability_report.md`（小模型稳定性）。
